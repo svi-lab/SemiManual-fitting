@@ -246,7 +246,7 @@ cid2 = fig.canvas.mpl_connect('scroll_event', onclick)#scroll)
 while not 'block' in locals():
     plt.waitforbuttonpress(timeout=-1)
 del block
-# this last part had to be added so to block the execution until the user
+# these last 3 lines had to be added so to block the execution until the user
 # finishes with "manual fitting"
 
 
