@@ -301,10 +301,10 @@ plt.show(block=False)
 
 greska = np.sqrt(np.diag(b))
 plt.figure(figsize=(16,12))
-plt.plot(y, lw=4, c='k')
+plt.plot(x, y, lw=4, c='k')
 #plt.plot(manualfit, '--y', lw=3, alpha=0.6)
 for i in range(len(manualfit_components)):
-    plt.plot(pv(x, *a[i*5:i*5+5])-a[i*5+3], alpha=0.5, label=[f"{prd:.2f}\U000000B1{krk:.1f}" for prd, krk in list(zip(a[i*5:i*5+5], greska[i*5:i*5+5]))]) # offset is offset :)
+    plt.plot(x, pv(x, *a[i*5:i*5+5])-a[i*5+3], alpha=0.5, label=[f"{prd:.2f}\U000000B1{krk:.1f}" for prd, krk in list(zip(a[i*5:i*5+5], greska[i*5:i*5+5]))]) # offset is offset :)
 plt.legend()
 plt.title('Showing the individual peaks as found by fitting procedure')
 
