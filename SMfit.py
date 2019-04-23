@@ -58,7 +58,7 @@ def fitting_function(x, *params):
     where 5 is the number of parameters in the "pv" function.
     Look in the docstring of pv function for more info on theese.
     '''
-    result = np.zeros_like(X, dtype=np.float)
+    result = np.zeros_like(x, dtype=np.float)
     for ii in range(0, len(params), 5):
         result += simple_pseudo_voigt(x, *params[ii:ii+5]) # A, c, w, o, r)
     return result
@@ -71,26 +71,25 @@ def fitting_function(x, *params):
 # You should replace this whole cell with loading your own data
 # Yyou should provide x and y as numpy arrays of shape ("length of data", )
 
-# =============================================================================
-# dummy_params = [51, 200, 85, 0, 0.7,
-#  4, 272, 37, 0, 0.8,
-#  2.7, 317, 39, 0, 0.52,
-#  3.9, 471, 62, 0, 0.25]
-# =============================================================================
+dummy_params = [51, 200, 85, 0, 0.7,
+ 4, 272, 37, 0, 0.8,
+ 2.7, 317, 39, 0, 0.52,
+ 3.9, 471, 62, 0, 0.25]
+
+dummy_x = np.arange(0,584, 1.34)
+dummy_y = fitting_function(dummy_x, *dummy_params)
+dummy_y += np.random.random(len(dummy_x))*np.mean(dummy_y)/5
+
+
+X = dummy_x
+Y = dummy_y
 
 # =============================================================================
-# dummy_x = np.arange(0,584, 1.34)
-# dummy_y = fitting_function(dummy_x, *dummy_params)
-# dummy_y += np.random.random(len(dummy_x))*np.mean(dummy_y)/5
-#
-#
-# x = dummy_x
-# y = dummy_y
+# # The following is the example of how to import your data:
+# DATA = np.load('../c0.npy')
+# Y = DATA[0][440:-30]
+# X = np.arange(len(Y))
 # =============================================================================
-
-DATA = np.load('../c0.npy')
-Y = DATA[0][440:-30]
-X = np.arange(len(Y))
 
 # In[6]:
 
