@@ -18,6 +18,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
+from matplotlib.artist import ArtistInspector
 from cycler import cycler
 from copy import copy
 from itertools import chain
@@ -70,8 +71,8 @@ def fitting_function(x, *params):
 # In[5]:
 # Creating some data...
 # You should replace this whole cell with loading your own data
-# Yyou should provide x and y as numpy arrays of shape ("length of data", )
-
+# You should provide x and y as numpy arrays of shape ("length of data", )
+# For example: >>> x, y = np.loadtxt("your_file_containing_data.txt")
 
 dummy_params = [51, 200, 85, 0.7,
                 10, 272, 37, 0.8,
@@ -86,24 +87,21 @@ dummy_y += np.random.random(len(dummy_x))*np.mean(dummy_y)/5
 x = dummy_x
 y = dummy_y
 
-
 # In[6]:
 
 
 # Setting some sensible values to be used afterwards,
 # for example the point size (normally, no need to change theese):
-nx = 80
-rapport = 100
+def set_size(variable, rapport=70):
+    return (variable.max() - variable.min())/rapport
 
 
+x_size = set_size(x)
+y_size = 2*set_size(y)
 # Setting up the plot:
 fig, ax = plt.subplots(figsize=(16, 8))
 ax.scatter(x, y, marker='o', c='k', s=64, alpha=0.5, edgecolors='none')
-
-
-x_size = (ax.get_xlim()[1] - ax.get_xlim()[0])/rapport
-y_size = 2*(ax.get_ylim()[1] - ax.get_ylim()[0])/rapport
-
+plt.show()
 # %%
 
 # this sets up the color palette to be used for plotting lines:
@@ -148,14 +146,14 @@ def onclick(event):
             click_in_artist = [artist.contains(event)[0] for artist in artists]
             if not any(click_in_artist):  # if click was not on any elipsis
                 peaks_present += 1
-                artists.append(ax.add_artist(
-                        Ellipse((event.xdata, event.ydata),
-                                x_size, y_size, alpha=0.5,
-                                picker=max(x_size, y_size),
-                                gid=peaks_present)))
+                one_elipsis = ax.add_artist(
+                                Ellipse((event.xdata, event.ydata),
+                                        x_size, y_size, alpha=0.5,
+                                        gid=str(peaks_present)))
+                artists.append(one_elipsis)
                 h = event.ydata
                 x0 = event.xdata
-                yy = pV(x=x, h=h, x0=x0, w=h*x_size/5)
+                yy = pV(x=x, h=h, x0=x0, w=x_size)
                 pic['line'].append(ax.plot(x, yy, alpha=0.75, lw=2.5,
                                    picker=5))
                 # ax.set_ylim(auto=True)
@@ -165,11 +163,11 @@ def onclick(event):
 # ax.fill_between(x, yy.min(), yy, alpha=0.3, color=cycle[peaks_present])
                 fig.canvas.draw_idle()
 
-            else:  # if the click was on one of the elipses
+            elif any(click_in_artist):  # if the click was on one of the elipses
                 clicked_indice = click_in_artist.index(True)
                 artists[clicked_indice].remove()
                 artists.pop(clicked_indice)
-                ax.lines[clicked_indice].remove()
+                ax.lines.remove(pic['line'][clicked_indice][0])
                 pic['line'].pop(clicked_indice)
                 pic['x0'].pop(clicked_indice)
                 pic['h'].pop(clicked_indice)
@@ -223,7 +221,7 @@ def onclick(event):
                 else:
                     w2 = 0.01
                     # This doesn't allow you to sroll to negative values
-                    # (basic width is x_size)
+                    # (basic width is x_size)aliased_name
                     scroll_count = -x_size+0.01
 
                 center2 = pic['x0'][peak_identifier]
