@@ -25,8 +25,13 @@ from itertools import chain
 from scipy.optimize import curve_fit
 plt.style.use('bmh')
 
+# initial parameters:
+scrolling_speed: float = 1
+initial_width: float = 5
+initial_GaussToLoretnz_ratio = 0.5
+figsize = (12, 8)
 
-def pV(x, h=30, x0=0, w=10, factor=0.99):
+def pV(x, h=30, x0=0, w=10, factor=initial_GaussToLoretnz_ratio):
     '''Manualy created pseudo-Voigt profile
     Parameters:
     ------------
@@ -99,8 +104,14 @@ def set_size(variable, rapport=70):
 x_size = set_size(x)
 y_size = 2*set_size(y)
 # %% Setting up the plot:
-fig, ax = plt.subplots(figsize=(16, 8))
-ax.scatter(x, y, marker='o', c='k', s=64, alpha=0.5, edgecolors='none')
+fig, ax = plt.subplots(figsize=figsize)
+ax.plot(x, y, linestyle='none', marker='o', c='k', ms=4, alpha=0.5)#, edgecolors='none')
+#ax.scatter(x, y, marker='o', c='k', s=64, alpha=0.5, edgecolors='none')
+#ax.autoscale(enable=True, axis='y', tight=True)
+#ax.set_ylim(np.min(y)-y_size*5, np.max(y)+y_size*8)
+ax.set_title('Left-click to add/remove peaks,'
+             'Scroll to adjust width, \nRight-click to draw sum,'
+             'Double-Right-Click when done')
 plt.show()
 # %%
 
@@ -121,17 +132,18 @@ pic['fill'] = []
 
 # Iterator used normally for counting right clicks
 # (each right click launches the plot of the cumulative curbe)
-cum_graph_present = 0
+cum_graph_present:int = 0 # actually only 0 or 1
 
 # List of cumulated graphs
 # (used later for updating while removing previous one)
 sum_peak = []
 
-peaks_present = 0
+peaks_present:int = 0
 cid3 = []
 scroll_count = 0  # counter to store the cumulative values of scrolling
 artists = []
-clicked_indice = -1
+clicked_indice:int = -1
+
 
 
 plt.ioff()
@@ -139,9 +151,10 @@ plt.ioff()
 
 def onclick(event):
     global cum_graph_present, peaks_present, scroll_count, clicked_indice
-    global x_size, y_size, x, block
+    global x_size, y_size, x, block, scrolling_speed, initial_width
     if event.inaxes == ax:  # if you click inside the plot
         if event.button == 1:  # left click
+
             # Create list of all elipes and check if the click was inside:
             click_in_artist = [artist.contains(event)[0] for artist in artists]
             if any(click_in_artist):  # if the click was on one of the elipses
@@ -160,7 +173,7 @@ def onclick(event):
                 peaks_present += 1
                 h = event.ydata
                 x0 = event.xdata
-                yy = pV(x=x, h=h, x0=x0, w=x_size)
+                yy = pV(x=x, h=h, x0=x0, w=x_size*initial_width)
                 one_elipsis = ax.add_artist(
                                 Ellipse((x0, h),
                                         x_size, y_size, alpha=0.5,
@@ -175,30 +188,38 @@ def onclick(event):
 # ax.fill_between(x, yy.min(), yy, alpha=0.3, color=cycle[peaks_present])
                 fig.canvas.draw_idle()
 
-
-
         elif event.button == 3 and not event.step:
             # On some computers middle click and right click have both value 3
-            if cum_graph_present > 0:  # Checks if there is already a cumulated graph plotted
-                # remove the last cumulated graph from the figure:
-                ax.lines.remove(sum_peak[-1][0])
-                sum_peak.pop()
             # Sum all the y values from all the peaks:
             sumy = np.sum(np.asarray(
                     [pic['line'][i][0].get_ydata() for i in range(peaks_present)]),
                     axis=0)
-            # Added this condition for the case where you removed all peaks,
-            # but the cumulated graph is left
-            # then right-clicking need to remove that one as well:
-            if sumy.shape == x.shape:
-                # plot the cumulated graph:
-                sum_peak.append(ax.plot(x, sumy, '--', color='lightgreen',
-                                        lw=3, alpha=0.6))
-                cum_graph_present += 1 # One cumulated graph added
+# Check if there is already a cumulated graph plotted:
+            if cum_graph_present > 0:
+# Check if the sum of present peaks correponds to the cumulated graph
+                if np.array_equal(sum_peak[-1][0].get_ydata(), sumy):
+                    pass
+# if not, remove the last cumulated graph from the figure:
+                else:
+                    ax.lines.remove(sum_peak[-1][0])
+                    sum_peak.pop()
+                    cum_graph_present -= 1
+                    if sumy.shape == x.shape:
+                        # plot the new cumulated graph:
+                        sum_peak.append(ax.plot(x, sumy,
+                                                '--',
+                                                color='lightgreen',
+                                                lw=3, alpha=0.6))
+                        cum_graph_present += 1
+            elif cum_graph_present == 0:  # No cumulated graph present
+                if sumy.shape == x.shape:
+                    sum_peak.append(ax.plot(x, sumy,
+                                            '--',
+                                            color='lightgreen',
+                                            lw=3, alpha=0.6))
+                    cum_graph_present += 1
             else:
-                # if you right clicked on the graph with no peaks,
-                # you removed the cumulated graph as well
-                it-=1
+                raise("sto to cinis?")
             fig.canvas.draw_idle()
 
         elif event.step != 0:
@@ -216,14 +237,14 @@ def onclick(event):
                  you didn't like by clicking on it's top)'''
 
                 # This adjust the "speed" of width change with scrolling:
-                scroll_count += x_size*event.step/15
+                scroll_count += x_size*np.sign(event.step)*scrolling_speed/10
 
                 if scroll_count > -x_size*0.999:
                     w2 = x_size + scroll_count
                 else:
                     w2 = x_size/1000
                     # This doesn't allow you to sroll to negative values
-                    # (basic width is x_size)aliased_name
+                    # (basic width is x_size)
                     scroll_count = -x_size*0.999
 
                 center2 = pic['x0'][peak_identifier]
@@ -250,9 +271,7 @@ def onclick(event):
             return
 
 
-ax.set_title('Left-click to add/remove peaks,'
-             'Scroll to adjust width, Right-click to draw sum,'
-             'Double-Right-Click when done')
+
 cid = fig.canvas.mpl_connect('button_press_event', onclick)
 cid2 = fig.canvas.mpl_connect('scroll_event', onclick)
 
@@ -267,7 +286,8 @@ while not 'block' in locals():
 # creating the list of initial parameters from your manual input:
 # (as a list of lists)
 manualfit_components_params = copy(list(map(list, zip(
-                            pic['h'], pic['x0'], pic['w'], [0.65]*peaks_present
+                            pic['h'], pic['x0'], pic['w'],
+                            [initial_GaussToLoretnz_ratio]*peaks_present
                             ))))
 # to transform the list of lists into one single list:
 manualfit_components_params = list(chain(*manualfit_components_params))
@@ -279,7 +299,7 @@ manualfit = sum_peak[0][0].get_data()[1]
 
 # Setting the bounds based on your input
 # (you can play with this part if you feel like it,
-# but leaving it as it is should be ok)
+# but leaving it as it is should be ok for basic usage)
 
 # set the initial bounds as infinities:
 upper_bounds = np.ones(len(manualfit_components_params))*np.inf
@@ -317,10 +337,11 @@ bounds = (lower_bounds, upper_bounds)
 # The curve-fitting part:
 fitted_params, b = curve_fit(fitting_function, x, y,
                              p0=manualfit_components_params, absolute_sigma=False, bounds=bounds)
+fitting_err = np.sqrt(np.diag(b))
 
 y_fitted = fitting_function(x, *fitted_params)
 
-figg, axx, = plt.subplots(figsize=(16, 12))
+figg, axx, = plt.subplots(figsize=figsize)
 figg.subplots_adjust(bottom=0.2)
 errax = figg.add_axes([0.125, 0.05, 0.775, 0.1])
 errax.set_facecolor('w')
@@ -328,24 +349,24 @@ errax.set_facecolor('w')
 axx.plot(x, manualfit,
          '--g', alpha=0.5, label='initial manual fit')
 
-axx.scatter(x, y, alpha=0.4, edgecolor='none', label='original data')
+axx.plot(x, y, linestyle='none', marker='o', alpha=0.4, label='original data')
 
 axx.plot(x, y_fitted,
          '--r', lw=4, alpha=0.6, label='after optimization')
 
 axx.legend()
 
-errax.scatter(x, y-y_fitted)
-errax.set_ylabel('error')
+errax.plot(x, y-y_fitted, linestyle='none', marker='o')
+errax.set_ylabel('error (data - fit)')
+errax.set_xlabel(f'params error sum = {np.sum(fitting_err):.3f}'
+                 f' (an indication on uncertenty of the fit)')
 axx.set_title('After fitting')
 plt.show(block=False)
 
 # In[8]:
 
-
-fitting_err = np.sqrt(np.diag(b))
-plt.figure(figsize=(16, 12))
-plt.scatter(x, y, lw=4, c='k', alpha=0.3, edgecolor='none')
+plt.figure(figsize=figsize)
+plt.plot(x, y, linestyle='none', marker='o', ms=4, c='k', alpha=0.3)
 plt.plot(x, fitting_function(x, *fitted_params),
          '--k', lw=2, alpha=0.6, label='fit')
 par_nam = ['h', 'x0', 'w', 'G/L']
