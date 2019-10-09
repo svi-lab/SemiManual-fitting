@@ -98,7 +98,7 @@ def set_size(variable, rapport=70):
 
 x_size = set_size(x)
 y_size = 2*set_size(y)
-# Setting up the plot:
+# %% Setting up the plot:
 fig, ax = plt.subplots(figsize=(16, 8))
 ax.scatter(x, y, marker='o', c='k', s=64, alpha=0.5, edgecolors='none')
 plt.show()
@@ -121,7 +121,7 @@ pic['fill'] = []
 
 # Iterator used normally for counting right clicks
 # (each right click launches the plot of the cumulative curbe)
-it = 0
+cum_graph_present = 0
 
 # List of cumulated graphs
 # (used later for updating while removing previous one)
@@ -138,22 +138,34 @@ plt.ioff()
 
 
 def onclick(event):
-    global it, peaks_present, scroll_count, clicked_indice
+    global cum_graph_present, peaks_present, scroll_count, clicked_indice
     global x_size, y_size, x, block
     if event.inaxes == ax:  # if you click inside the plot
         if event.button == 1:  # left click
             # Create list of all elipes and check if the click was inside:
             click_in_artist = [artist.contains(event)[0] for artist in artists]
-            if not any(click_in_artist):  # if click was not on any elipsis
+            if any(click_in_artist):  # if the click was on one of the elipses
+                clicked_indice = click_in_artist.index(True)
+                artists[clicked_indice].remove()
+                artists.pop(clicked_indice)
+                ax.lines.remove(pic['line'][clicked_indice][0])
+                pic['line'].pop(clicked_indice)
+                pic['x0'].pop(clicked_indice)
+                pic['h'].pop(clicked_indice)
+                pic['w'].pop(clicked_indice)
+                peaks_present -= 1
+                fig.canvas.draw_idle()
+
+            else:  # if click was not on any elipsis
                 peaks_present += 1
-                one_elipsis = ax.add_artist(
-                                Ellipse((event.xdata, event.ydata),
-                                        x_size, y_size, alpha=0.5,
-                                        gid=str(peaks_present)))
-                artists.append(one_elipsis)
                 h = event.ydata
                 x0 = event.xdata
                 yy = pV(x=x, h=h, x0=x0, w=x_size)
+                one_elipsis = ax.add_artist(
+                                Ellipse((x0, h),
+                                        x_size, y_size, alpha=0.5,
+                                        gid=str(peaks_present)))
+                artists.append(one_elipsis)
                 pic['line'].append(ax.plot(x, yy, alpha=0.75, lw=2.5,
                                    picker=5))
                 # ax.set_ylim(auto=True)
@@ -163,21 +175,11 @@ def onclick(event):
 # ax.fill_between(x, yy.min(), yy, alpha=0.3, color=cycle[peaks_present])
                 fig.canvas.draw_idle()
 
-            elif any(click_in_artist):  # if the click was on one of the elipses
-                clicked_indice = click_in_artist.index(True)
-                artists[clicked_indice].remove()
-                artists.pop(clicked_indice)
-                ax.lines.remove(pic['line'][clicked_indice][0])
-                pic['line'].pop(clicked_indice)
-                pic['x0'].pop(clicked_indice)
-                pic['h'].pop(clicked_indice)
-                pic['w'].pop(clicked_indice)
-                fig.canvas.draw_idle()
-                peaks_present -= 1
+
 
         elif event.button == 3 and not event.step:
-            # On my laptop middle click and right click have the same values
-            if it > 0:  # Checks if there is already a cumulated graph plotted
+            # On some computers middle click and right click have both value 3
+            if cum_graph_present > 0:  # Checks if there is already a cumulated graph plotted
                 # remove the last cumulated graph from the figure:
                 ax.lines.remove(sum_peak[-1][0])
                 sum_peak.pop()
@@ -192,14 +194,14 @@ def onclick(event):
                 # plot the cumulated graph:
                 sum_peak.append(ax.plot(x, sumy, '--', color='lightgreen',
                                         lw=3, alpha=0.6))
-                it+=1 # One cumulated graph added
+                cum_graph_present += 1 # One cumulated graph added
             else:
                 # if you right clicked on the graph with no peaks,
                 # you removed the cumulated graph as well
                 it-=1
             fig.canvas.draw_idle()
 
-        if event.step != 0:
+        elif event.step != 0:
             if peaks_present:
                 # -1 means that scrolling will only affect the last plotted peak
                 peak_identifier = -1
@@ -216,13 +218,13 @@ def onclick(event):
                 # This adjust the "speed" of width change with scrolling:
                 scroll_count += x_size*event.step/15
 
-                if scroll_count > -x_size+0.01:
+                if scroll_count > -x_size*0.999:
                     w2 = x_size + scroll_count
                 else:
-                    w2 = 0.01
+                    w2 = x_size/1000
                     # This doesn't allow you to sroll to negative values
                     # (basic width is x_size)aliased_name
-                    scroll_count = -x_size+0.01
+                    scroll_count = -x_size*0.999
 
                 center2 = pic['x0'][peak_identifier]
                 h2 = pic['h'][peak_identifier]
