@@ -92,21 +92,21 @@ x = dummy_x
 y = dummy_y
 
 # In[6]:
-
 # Setting some sensible values to be used afterwards,
 # impacting for example the elipse size and initial width:
+
 def set_size(variable, rapport=70):
     return (variable.max() - variable.min())/rapport
 
-
 x_size = set_size(x)
 y_size = 2*set_size(y)
+
 # %% Setting up the plot:
 fig, ax = plt.subplots(figsize=figsize)
 ax.plot(x, y, linestyle='none', marker='o', c='k', ms=4, alpha=0.5)
 ax.set_title('Left-click to add/remove peaks,'
              'Scroll to adjust width, \nRight-click to draw sum,'
-             'Double-Right-Click when done')
+             ' Double-Right-Click when done')
 plt.show()
 # %%
 
@@ -292,8 +292,8 @@ lower_bounds = np.ones(len(manualfit_components_params))*(-np.inf)
 
 # setting reasonable bounds for the peak amplitude
 # as a portion to your initial manual estimate
-upper_bounds[0::4] = [A*1.32 for A in manualfit_components_params[0::4]]
-lower_bounds[0::4] = [A*0.75 for A in manualfit_components_params[0::4]]
+upper_bounds[0::4] = [A*1.2 for A in manualfit_components_params[0::4]]
+lower_bounds[0::4] = [A*0.8 for A in manualfit_components_params[0::4]]
 
 # setting reasonable bounds for the peak position
 # as a shift in regard to your initial manual position
@@ -304,7 +304,7 @@ lower_bounds[1::4] = \
 
 # setting the bounds for the widths
 upper_bounds[2::4] = \
-    [width*10 for width in manualfit_components_params[2::4]]
+    [width*6 for width in manualfit_components_params[2::4]]
 lower_bounds[2::4] = \
     [width*0.5 for width in manualfit_components_params[2::4]]
 
@@ -358,7 +358,6 @@ plt.plot(x, y, linestyle='none', marker='o', ms=4, c='k', alpha=0.3)
 plt.plot(x, fitting_function(x, *fitted_params),
          '--k', lw=2, alpha=0.6, label='fit')
 par_nam = ['h', 'x0', 'w', 'G/L']
-# plt.plot(manualfit, '--y', lw=3, alpha=0.6)
 for i in range(peak_counter):
     fit_res = list(zip(par_nam, fitted_params[i*4:i*4+4],
                        fitting_err[i*4:i*4+4]))
