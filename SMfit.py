@@ -66,6 +66,8 @@ def fitting_function(x, *params):
     where 4 is the number of parameters in the "pV" function.
     Look in the docstring of pV function for more info on theese.
     '''
+    assert len(params) % 4 == 0, 'check the number of params,' \
+                                ' it should be a multiple of 4!'
     result = np.zeros_like(x, dtype=np.float)
     for i in range(0, len(params), 4):
         result += pV(x, *params[i:i+4])  # h, x0, w, r)
@@ -78,7 +80,7 @@ def fitting_function(x, *params):
 # You should provide x and y as numpy arrays of shape ("length of data", )
 # For example: >>> x, y = np.loadtxt("your_file_containing_data.txt")
 
-dummy_params = [51, 200, 85, 0.7,
+dummy_params = [51, 200, 85, 0.3,
                 10, 272, 37, 0.8,
                 2.7, 317, 39, 0.52,
                 3.9, 471, 62, 0.25]
@@ -266,18 +268,19 @@ while not 'block' in locals():
     plt.waitforbuttonpress(timeout=-1)
 
 # In[7]:
-peak_counter: int = len(pic['line'])
+peaks_present: int = len(pic['line'])
 
 # creating the list of initial parameters from your manual input:
 # (as a list of lists)
 manualfit_components_params = copy(list(map(list, zip(
                             pic['h'], pic['x0'], pic['w'],
-                            [initial_GaussToLoretnz_ratio]*peak_counter
+                            [initial_GaussToLoretnz_ratio]*peaks_present
                             ))))
 # to transform the list of lists into one single list:
 manualfit_components_params = list(chain(*manualfit_components_params))
 
 # the sum of manually created peaks:
+assert len(sum_peak) > 0, 'No peaks initiated'
 manualfit = sum_peak[0][0].get_data()[1]
 
 # In[7]:
@@ -292,8 +295,8 @@ lower_bounds = np.ones(len(manualfit_components_params))*(-np.inf)
 
 # setting reasonable bounds for the peak amplitude
 # as a portion to your initial manual estimate
-upper_bounds[0::4] = [A*1.2 for A in manualfit_components_params[0::4]]
-lower_bounds[0::4] = [A*0.8 for A in manualfit_components_params[0::4]]
+upper_bounds[0::4] = [A*1.4 for A in manualfit_components_params[0::4]]
+lower_bounds[0::4] = [A*0.7 for A in manualfit_components_params[0::4]]
 
 # setting reasonable bounds for the peak position
 # as a shift in regard to your initial manual position
@@ -304,7 +307,7 @@ lower_bounds[1::4] = \
 
 # setting the bounds for the widths
 upper_bounds[2::4] = \
-    [width*6 for width in manualfit_components_params[2::4]]
+    [width*16 for width in manualfit_components_params[2::4]]
 lower_bounds[2::4] = \
     [width*0.5 for width in manualfit_components_params[2::4]]
 
@@ -346,27 +349,34 @@ axx.legend()
 errax.plot(x, y-y_fitted, linestyle='none', marker='o')
 errax.set_ylabel('error\n(data - fit)')
 errax.set_xlabel(f'fitting error = '
-                 f'{np.sum(fitting_err/np.ceil(fitted_params))/peak_counter:.3f}'
+                 f'{np.sum(fitting_err/np.ceil(fitted_params))/peaks_present:.3f}'
                  f'\n\u03A3(\u0394param/param) /n_peaks')
+errax2 = errax.twinx()
+errax2.set_yticks([])
+errax2.set_ylabel(f'\u03A3(\u0394y) = {np.sum(y-y_fitted):.2f}',
+                  fontsize='small')
 axx.set_title('After fitting')
 plt.show(block=False)
 
 # In[8]:
 
-plt.figure(figsize=figsize)
-plt.plot(x, y, linestyle='none', marker='o', ms=4, c='k', alpha=0.3)
-plt.plot(x, fitting_function(x, *fitted_params),
+pfig, pax = plt.subplots(figsize=figsize)
+
+pax.plot(x, y, linestyle='none', marker='o', ms=4, c='k', alpha=0.3)
+pax.plot(x, y_fitted,
          '--k', lw=2, alpha=0.6, label='fit')
 par_nam = ['h', 'x0', 'w', 'G/L']
-for i in range(peak_counter):
+for i in range(peaks_present):
     fit_res = list(zip(par_nam, fitted_params[i*4:i*4+4],
                        fitting_err[i*4:i*4+4]))
     label = [f"{P}={v:.2f}\U000000B1{e:.1f}" for P, v, e in fit_res]
-    plt.plot(x, pV(x, *fitted_params[i*4:i*4+4]), alpha=0.5, label=label)
-plt.legend()
-plt.title('Showing the individual peaks as found by fitting procedure')
+    yy_i = pV(x, *fitted_params[i*4:i*4+4])
+    peak_i, = pax.plot(x, yy_i, alpha=0.5, label=label)
+    pax.fill_between(x, yy_i, facecolor=peak_i.get_color(), alpha=0.3)
+pfig.legend()
+pfig.suptitle('Showing the individual peaks as found by fitting procedure')
 
-plt.show(block=False)
+pfig.show()#block=False)
 parametar_names = ['Height', 'Center', 'FWMH', 'Ratio Gauss/Lorenz']
 print(f"{'Your initial guess':>47s}{'After fitting':>19s}\n")
 for i in range(len(fitted_params)):
