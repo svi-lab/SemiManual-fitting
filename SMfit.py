@@ -20,7 +20,7 @@ from copy import copy
 from itertools import chain
 from scipy.optimize import curve_fit
 from utilities import fitonclick, pV
-from utilities import multi_pV as fitting_function
+from utilities import multi_peak as fitting_function
 plt.style.use('bmh')
 
 figsize = (12, 10)
