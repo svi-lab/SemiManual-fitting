@@ -16,64 +16,14 @@
 # In[4]:
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Ellipse
-#from matplotlib.artist import ArtistInspector
 from copy import copy
 from itertools import chain
 from scipy.optimize import curve_fit
+from utilities import fitonclick, pV
+from utilities import multi_pV as fitting_function
 plt.style.use('bmh')
 
-# initial parameters:
-scrolling_speed: float = 1
-initial_width: float = 5
-initial_GaussToLoretnz_ratio = 0.5
-figsize = (12, 8)
-
-
-def pV(x, h=30, x0=0, w=10, factor=0.5):
-    '''Manualy created pseudo-Voigt profile
-    Parameters:
-    ------------
-    x: Independent variable
-    h: height
-    x0: The position of the peak on the x-axis
-    w: FWHM
-    factor: the ratio of lorentz vs gauss in the peak
-    Returns:
-    y-array of the same shape as the input x-array
-    '''
-
-    def Gauss(x, w):
-        return((2/w) * np.sqrt(np.log(2)/np.pi) * np.exp(
-                -(4*np.log(2)/w**2) * (x - x0)**2))
-
-    def Lorentz(x, w):
-        return((1/np.pi)*(w/2) / (
-                (x - x0)**2 + (w/2)**2))
-
-    intensity = h * np.pi * (w/2) / (
-                    1 + factor * (np.sqrt(np.pi*np.log(2)) - 1))
-
-    return(intensity * (factor * Gauss(x, w)
-                        + (1-factor) * Lorentz(x, w)))
-
-
-def fitting_function(x, *params):
-    '''
-    The function giving the sum of the pseudo-Voigt peaks.
-    Parameters:
-    *params: is a list of parameters. Its length is = 4 * "number of peaks",
-    where 4 is the number of parameters in the "pV" function.
-    Look in the docstring of pV function for more info on theese.
-    '''
-    assert len(params) % 4 == 0, 'check the number of params,' \
-                                ' it should be a multiple of 4!'
-    result = np.zeros_like(x, dtype=np.float)
-    for i in range(0, len(params), 4):
-        result += pV(x, *params[i:i+4])  # h, x0, w, r)
-    return result
-
-
+figsize = (12, 10)
 # In[5]:
 # Creating some data...
 # You should replace this whole cell with loading your own data
@@ -94,197 +44,30 @@ x = dummy_x
 y = dummy_y
 
 # In[6]:
-# Setting some sensible values to be used afterwards,
-# impacting for example the elipse size and initial width:
-
-def set_size(variable, rapport=70):
-    return (variable.max() - variable.min())/rapport
-
-x_size = set_size(x)
-y_size = 2*set_size(y)
-
-# %% Setting up the plot:
-fig, ax = plt.subplots(figsize=figsize)
-ax.plot(x, y, linestyle='none', marker='o', c='k', ms=4, alpha=0.5)
-ax.set_title('Left-click to add/remove peaks,'
-             'Scroll to adjust width, \nRight-click to draw sum,'
-             ' Double-Right-Click when done')
-plt.show()
-# %%
-
-# Initiating variables to which we will atribute peak caractéristics:
-pic = {}
-pic['line'] = []  # List containing matplotlib.Line2D object for each peak
-pic['h'] = []  # List that will contain heights of each peak
-pic['x0'] = []  # List that will contain central positions of each peak
-pic['w'] = []  # List containing widths
-
-# List of cumulated graphs
-# (used later for updating while removing previous one)
-sum_peak = []
-
-cid3 = []
-scroll_count = 0  # counter to store the cumulative values of scrolling
-artists = []  # will be used to store the elipses on tops of the peaks
-
-plt.ioff()
-
-
-def onclick(event, x=x, x_size=x_size, y_size=y_size,
-            scrolling_speed=scrolling_speed,
-            initial_width=initial_width,
-            GL=initial_GaussToLoretnz_ratio):
-    global pic, sum_peak, artists, scroll_count, block
-
-    cum_graph_present: int = len(sum_peak)  # actually only 0 or 1
-    peak_counter: int = len(pic['line'])  # number of peaks on the graph
-
-    def _add_peak(artists, pic):
-        h = event.ydata
-        x0 = event.xdata
-        yy = pV(x=x, h=h, x0=x0, w=x_size*initial_width, factor=GL)
-        one_elipsis = ax.add_artist(
-                        Ellipse((x0, h),
-                                x_size, y_size, alpha=0.5,
-                                gid=str(peak_counter)))
-        artists.append(one_elipsis)
-        pic['line'].append(ax.plot(x, yy, alpha=0.75, lw=2.5,
-                           picker=5))
-        # ax.set_ylim(auto=True)
-        pic['h'].append(h)
-        pic['x0'].append(x0)
-        pic['w'].append(x_size)
-        fig.canvas.draw_idle()
-        return(artists, pic)
-
-    def _remove_peak(clicked_indice, artists, pic):
-        artists[clicked_indice].remove()
-        artists.pop(clicked_indice)
-        ax.lines.remove(pic['line'][clicked_indice][0])
-        pic['line'].pop(clicked_indice)
-        pic['x0'].pop(clicked_indice)
-        pic['h'].pop(clicked_indice)
-        pic['w'].pop(clicked_indice)
-        fig.canvas.draw_idle()
-        return(artists, pic)
-
-    def _draw_peak_sum(cum_graph_present, sum_peak, pic):
-        def _remove_sum(sum_peak):
-            ax.lines.remove(sum_peak[-1][0])
-            sum_peak.pop()
-            return sum_peak
-        def _add_sum(sum_peak):
-            sum_peak.append(ax.plot(x, sumy,
-                                    '--',
-                                    color='lightgreen',
-                                    lw=3, alpha=0.6))
-            return sum_peak
-        # Sum all the y values from all the peaks:
-        sumy = np.sum(np.asarray(
-                [pic['line'][i][0].get_ydata() for i in range(peak_counter)]),
-                axis=0)
-        # Check if there is already a cumulated graph plotted:
-        if cum_graph_present == 1:
-            # Check if the sum of present peaks correponds to the cumulated graph
-            if np.array_equal(sum_peak[-1][0].get_ydata(), sumy):
-                pass
-            else:  # if not, remove the last cumulated graph from the figure:
-                sum_peak = _remove_sum(sum_peak)
-                cum_graph_present -= 1
-                # and then plot the new cumulated graph:
-                if sumy.shape == x.shape:
-                    sum_peak = _add_sum(sum_peak)
-                    cum_graph_present += 1
-        # No cumulated graph present:
-        elif cum_graph_present == 0:
-            # plot the new cumulated graph:
-            if sumy.shape == x.shape:
-                sum_peak = _add_sum(sum_peak)
-                cum_graph_present += 1
-        else:
-            raise("WTF?")
-        fig.canvas.draw_idle()
-        return(cum_graph_present, sum_peak)
-
-    def _adjust_peak_width(pic, peak_identifier=-1, scroll_count=scroll_count):
-        scroll_count += x_size*np.sign(event.step)*scrolling_speed/10
-
-        if scroll_count > -x_size*initial_width*0.999:
-            w2 = x_size*initial_width + scroll_count
-        else:
-            w2 = x_size*initial_width/1000
-            # This doesn't allow you to sroll to negative values
-            # (basic width is x_size)
-            scroll_count = -x_size*initital_width*0.999
-
-        center2 = pic['x0'][peak_identifier]
-        h2 = pic['h'][peak_identifier]
-        pic['w'][peak_identifier] = w2
-        yy = pV(x=x, x0=center2, h=h2, w=w2, factor=GL)
-        active_line = pic['line'][peak_identifier][0]
-        # This updates the values on the peak identified
-        active_line.set_ydata(yy)
-        ax.draw_artist(active_line)
-        fig.canvas.draw_idle()
-        return(scroll_count, pic)
-
-    # Now let's put everything together:peak_counter:int = 0
-    if event.inaxes == ax:  # if you click inside the plot
-        if event.button == 1:  # left click
-            # Create list of all elipses and check if the click on one of them:
-            click_in_artist = [artist.contains(event)[0] for artist in artists]
-            if any(click_in_artist):  # if the click was on one of the elipses
-                clicked_indice = click_in_artist.index(True) # identify the one
-                artists, pic = _remove_peak(clicked_indice, artists, pic)
-                peak_counter -= 1
-
-            else:  # if click was not on any of the already drawn elipsis
-                peak_counter += 1
-                artists, pic = _add_peak(artists, pic)
-
-        elif event.button == 3 and not event.step:
-            # On some computers middle and right click have both the value 3
-            cum_graph_present, sum_peak = _draw_peak_sum(cum_graph_present,
-                                                         sum_peak, pic)
-
-        elif event.step != 0:
-            if peak_counter:
-                scroll_count, pic = _adjust_peak_width(pic, peak_identifier=-1)
-                # -1 means that scrolling will only affect the last plotted peak
-
-        if event.button != 1 and event.dblclick:
-            block = True
-            fig.canvas.mpl_disconnect(cid)
-            fig.canvas.mpl_disconnect(cid2)
-            plt.close()
-            return
-
-
-
-cid = fig.canvas.mpl_connect('button_press_event', onclick)
-cid2 = fig.canvas.mpl_connect('scroll_event', onclick)
-
-while not 'block' in locals():
+# check the docstring for the fitonclick class:
+mfit = fitonclick(x, y, scrolling_speed=4, figsize=figsize)
+# Important:
+while mfit.block:
     plt.waitforbuttonpress(timeout=-1)
-
+plt.close()  # You can also leave the plot on if you want
 # In[7]:
-peaks_present: int = len(pic['line'])
+x_size = mfit.x_size
 
+peaks_present: int = mfit.peak_counter
+
+pic = mfit.pic
 # creating the list of initial parameters from your manual input:
 # (as a list of lists)
 manualfit_components_params = copy(list(map(list, zip(
-                            pic['h'], pic['x0'], pic['w'],
-                            [initial_GaussToLoretnz_ratio]*peaks_present
-                            ))))
+                            pic['h'], pic['x0'], pic['w'], pic['GL']))))
 # to transform the list of lists into one single list:
 manualfit_components_params = list(chain(*manualfit_components_params))
 
 # the sum of manually created peaks:
-assert len(sum_peak) > 0, 'No peaks initiated'
-manualfit = sum_peak[0][0].get_data()[1]
+assert len(mfit.sum_peak) > 0, 'No peaks initiated'
+manualfit = mfit.sum_peak[0][0].get_ydata()
 
 # In[7]:
-
 # Setting the bounds based on your input
 # (you can play with this part if you feel like it,
 # but leaving it as it is should be ok for basic usage)
@@ -329,7 +112,8 @@ fitted_params, b = curve_fit(fitting_function, x, y,
 fitting_err = np.sqrt(np.diag(b))
 
 y_fitted = fitting_function(x, *fitted_params)
-
+# %%
+# Plotting the results of the optimization:
 figg, axx, = plt.subplots(figsize=figsize)
 figg.subplots_adjust(bottom=0.25)
 errax = figg.add_axes([0.125, 0.1, 0.775, 0.1])
@@ -359,7 +143,7 @@ axx.set_title('After fitting')
 plt.show(block=False)
 
 # In[8]:
-
+# Plotting the individual peaks after fitting
 pfig, pax = plt.subplots(figsize=figsize)
 
 pax.plot(x, y, linestyle='none', marker='o', ms=4, c='k', alpha=0.3)
@@ -373,14 +157,16 @@ for i in range(peaks_present):
     yy_i = pV(x, *fitted_params[i*4:i*4+4])
     peak_i, = pax.plot(x, yy_i, alpha=0.5, label=label)
     pax.fill_between(x, yy_i, facecolor=peak_i.get_color(), alpha=0.3)
-pfig.legend()
-pfig.suptitle('Showing the individual peaks as found by fitting procedure')
+pax.legend()
+pax.set_title('Showing the individual peaks as found by fitting procedure')
 
-pfig.show()#block=False)
+pfig.show()
 parametar_names = ['Height', 'Center', 'FWMH', 'Ratio Gauss/Lorenz']
 print(f"{'Your initial guess':>47s}{'After fitting':>19s}\n")
 for i in range(len(fitted_params)):
     print(f"Peak {i//4}|   {parametar_names[i%4]:<20s}: "
           f" {manualfit_components_params[i]:8.2f}     ->    "
           f" {fitted_params[i]:6.2f} \U000000B1 {fitting_err[i]:4.2f}")
-
+# %%
+# Deleting the class instance, in case you want to start over
+del mfit
