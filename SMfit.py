@@ -13,7 +13,7 @@
 # - Right-clicking any time, will draw the sum of all the present profiles
 # - Left clicking on the top of existing peak erases it.
 
-# In[4]:
+# In[1]:
 import numpy as np
 import matplotlib.pyplot as plt
 from copy import copy
@@ -24,7 +24,7 @@ from utilities import multi_peak as fitting_function
 plt.style.use('bmh')
 
 figsize = (12, 10)
-# In[5]:
+# In[2]:
 # Creating some data...
 # You should replace this whole cell with loading your own data
 # You should provide x and y as numpy arrays of shape ("length of data", )
@@ -43,7 +43,7 @@ dummy_y += np.random.random(len(dummy_x))*np.mean(dummy_y)/5
 x = dummy_x
 y = dummy_y
 
-# In[6]:
+# In[3]:
 # check the docstring for the fitonclick class:
 mfit = fitonclick(x, y, scrolling_speed=4, figsize=figsize)
 # Important:
