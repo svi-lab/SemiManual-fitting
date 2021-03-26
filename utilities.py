@@ -12,18 +12,20 @@ from warnings import warn
 import matplotlib as mpl
 from matplotlib import pyplot as plt
 from matplotlib.widgets import Slider, Button, RadioButtons
+from matplotlib.patches import Ellipse
 from cycler import cycler
 import scipy
 from scipy import sparse
 from scipy.ndimage import median_filter
 from scipy.optimize import minimize_scalar
+from skimage import io, transform
 
 class AdjustCR_SearchSensitivity(object):
     """Allows to visually set the sensitivity for the Cosmic Rays detection.
     The graph shows the number and the distribution of CR candidates along the
     Raman shifts' axis. You can manually adjust the sensitivity
     (left=more sensitive, right=less sensitive)
-    
+
     The usage example is the following:
     ---------------------------------------
     >>># first you show the graph and set for the appropriate sensitivity value:
@@ -33,7 +35,7 @@ class AdjustCR_SearchSensitivity(object):
     >>>CR_spectra_ind = my_class_instance.CR_spectra_ind
     >>>mask_CR_cand = my_class_instance.mask_CR_cand
     >>>mask_whole = my_class_instance.mask_whole
-    
+
     The recovered values are:
     CR_spectra_ind: 1D ndarray of ints: The indices of the spectra containing
                                         the Cosmic Rays.
@@ -45,9 +47,9 @@ class AdjustCR_SearchSensitivity(object):
     mask_whole: 2D ndarray of bools::   Boolean mask of the same shape as the
                                         input spectra. True where the CRs are.
     """
-    
-    
-    
+
+
+
     def __init__(self, spectra, x_values=None, gradient_axis=-1):
         self.osa = gradient_axis
         self.spectra = spectra
@@ -75,17 +77,17 @@ class AdjustCR_SearchSensitivity(object):
         # Calling the "press" function on keypress event
         # (only arrow keys left and right work)
         self.fig.canvas.mpl_connect('key_press_event', self.press)
-        self.CR_spectra_ind, self.mask_whole, self.mask_CR_cand = self.calculate_mask(8)    
+        self.CR_spectra_ind, self.mask_whole, self.mask_CR_cand = self.calculate_mask(8)
         self.line, = self.ax.plot(self.x_values, np.sum(self.mask_whole, axis=-0))
         self.ax.set_title(f"Found {len(self.CR_spectra_ind)} cosmic rays")
         plt.show()
-        
+
     def calculate_mask(self, CR_coeff):
         self.uslov=CR_coeff*self.nabla_dev[:, np.newaxis]
         # find the indices of the potential CR candidates:
         self.cand_spectra, self.cand_sigma =\
                                     np.nonzero(np.abs(self.nabla) > self.uslov)
-        
+
         # indices of spectra containing the CR candidates:
         self.CR_spectra_ind = np.unique(self.cand_spectra)
         # we construct the mask with zeros everywhere except on the positions of CRs:
@@ -98,10 +100,10 @@ class AdjustCR_SearchSensitivity(object):
                                 structure=np.ones((1,self.ws)))
         self.mask_whole[self.CR_spectra_ind] = self.mask_CR_cand
         return self.CR_spectra_ind, self.mask_whole, self.mask_CR_cand
-        
-        
-    
-    
+
+
+
+
     def update(self, val):
         '''This function is for using the slider to scroll through frames'''
         self.CR_coeff = self.sframe.val
@@ -342,18 +344,39 @@ def slice_lr(spectra, sigma=None, pos_left=None, pos_right=None):
 
     return spectra_kept, sigma_kept
 
+#%%
+def pV(x:np.ndarray, h:float, x0:float=None, w:float=None, factor:float=0.5):
+    '''Creates an pseudo-Voigt profile.
 
-def pV(x, h=30, x0=0, w=10, factor=0.5):
-    '''Manualy created pseudo-Voigt profile
     Parameters:
     ------------
-    x: Independent variable
-    h: height
-    x0: The position of the peak on the x-axis
-    w: FWHM
-    factor: the ratio of lorentz vs gauss in the peak
+    x : 1D ndarray
+        Independent variable (Raman shift for ex.)
+    h : float
+        height of the peak
+    x0 : float
+        The position of the peak on the x-axis.
+        Default value is at the middle of the x
+    w : float
+        FWHM - The width
+        Default value is 1/3 of the x
+    factor : float
+        The ratio of Gauss vs Lorentz in the peak
+        Default value is 0.5
+
     Returns:
-    y-array of the same shape as the input x-array
+    --------------
+    y : np.ndarray :
+        1D-array of the same length as the input x-array
+    ***************************
+
+    Example :
+    --------------
+    >>> import numpy as np
+    >>> import matplotlib.pyplot as plt
+
+    >>> x = np.linspace(150, 1300, 1015)
+    >>> plt.plot(x, pV(x, 200))
     '''
 
     def Gauss(x, w):
@@ -364,65 +387,161 @@ def pV(x, h=30, x0=0, w=10, factor=0.5):
         return((1/np.pi)*(w/2) / (
                 (x - x0)**2 + (w/2)**2))
 
-    intensity = h * np.pi * (w/2) / (
-                    1 + factor * (np.sqrt(np.pi*np.log(2)) - 1))
+    if x0 == None:
+        x0 = x[int(len(x)/2)]
+    if w == None:
+        w = (x.max() - x.min()) / 3
+
+    intensity = h * np.pi * (w/2) /\
+                    (1 + factor * (np.sqrt(np.pi*np.log(2)) - 1))
 
     return(intensity * (factor * Gauss(x, w)
                         + (1-factor) * Lorentz(x, w)))
 
 
-def multi_pV(x, *params):
+def multi_pV(x, *params, peak_function=pV):
     '''
-    The function giving the sum of the pseudo-Voigt peaks.
-    Parameters:
-    x: independent variable
-    *params: is a list of parameters.
-    Its length is = 4 * "number of peaks",
-    where 4 is the number of parameters in the "pV" function.
-    Look in the docstring of pV function for more info on theese.
+    This function returns the spectra as the sum of the pseudo-Voigt peaks,
+    given the independent variable `x` and a set of parameters for each peak.
+    (one sublist for each Pseudo-Voigt peak).
+
+    Parameters :
+    -----------------
+    x : np.ndarray
+        1D ndarray - independent variable.
+    *params : list[list[float]]
+        The list of lists containing the peak parameters. For each infividual
+        peak to be created there should be a sublist of parameters to be
+        passed to the pV function. So that `params` list finally contains
+        one of these sublists for each Pseudo-Voigt peak to be created.
+        Look in the docstring of pV function for more info on theese params.
+
+    Returns :
+    -----------------
+    y : np.ndarray
+        1D ndarray of the same length as the input x-array
+
+    Example :
+    -----------------
+    >>> import numpy as np
+    >>> import matplotlib.pyplot as plt
+
+    >>> x = np.linspace(150, 1300, 1015) # Create 1015 equally spaced points
+    >>> mpar = [[40, 220, 100], [122, 440, 80], [164, 550, 160], [40, 480, 340]]
+    >>> plt.plot(x, multi_pV(x, mpar))
     '''
-    # The following presupposes that the first argument of the function
-    # is the independent variable and that the subsequent parameters are
-    # the function parameters:
-    n = 4
-    nn = len(params)
-    if nn % n != 0:
-        raise Exception(f"You gave {nn} parameters and your basic function"
-                        f"takes {n} parameters (The first one should be x"
-                        "and the remainign ones the parameters of the funct.")
     result = np.zeros_like(x, dtype=np.float)
-    for i in range(0, nn, n):
-        result += pV(x, *params[i:i+n])  # h, x0, w, r)
+    print(params)
+    for pp in params:
+        result += peak_function(x, *pp)  # h, x0, w, r)
     return result
 
 
-def create_map_spectra(x=None, initial_peak_params=[171, 200, 8, 0.7], N=2000, ponderation=None):
-    '''Creates simulated spectra
+def create_multiple_spectra(x:np.ndarray, initial_peak_params:list,
+                            defaults=None, N=10000, noise:float=0.02,
+                            spectrum_function=multi_pV,
+                            noise_bias='linea', funny_peak='random'):
+    '''Creates N different spectra using mutli_pV function.
+
     Params:
-        x: independent variable
-        initial_peak_params: list of peak parameters
-            the number of parameters must be a multiple of number of parameters
-            demanded by peak_function (let's say that number is N)
-            So, then you can set-up M peaks, just by supplying M x N parameters
-        peak_function: default is pseudo-Voigt
-        N: the number of spectra to create
-        ponderation: How much you want the spectra to differ between them
+    ----------------
+        x : np.ndarray
+            1D ndarray - independent variable
+        initial_peak_params: list[float]
+            The list of sublists containing individual peak parameters as
+            demanded by the `spectrum_function`.
+        defaults: list, optional
+            Default params for the sublists where not all params are set.
+            The function will try to come up with something if the defaults
+            are not provided.
+        N : int, optional
+            The number of spectra to create. Defaults to 1024 (32x32 :)
+        noise : float
+            Noisiness and how much you want the spectra to differ between them.
+        spectrum_function : function
+            The default is multi_pV.
+            You should be able to provide something else, but this is not yet
+            tested.
+        noise_bias: None or 'smiley' or 'linea'
+            Default is 'linea'.
+            The underlaying pattern of the differences between the spectra.
+        funny_peak: int or list of ints or 'random' or 'all'
+            Only applicable if `noise_bias` is 'smiley'.
+            Designates the peak on which you want the bias to appear.
+            If 'random', one peak is chosen randomly.
+
+    Returns:
+    -----------------
+    y : np.ndarray :
+        2D ndarray of the shape (N, len(x))
+
+    Example:
+    --------------
+    >>> import numpy as np
+    >>> import matplotlib.pyplot as plt
+
+    >>> x = np.linspace(150, 1300, 1015) # Create 1015 equally spaced points
+    >>> mpar = [[40, 220, 100], [122, 440, 80], [164, 550, 160], [40, 480, 340]]
+    >>> my_spectra = create_multiple_spectra(x, mpar)
     '''
-    if x is None:
-        xmin = np.min(initial_peak_params[1::4])*0.8
-        xmax = np.max(initial_peak_params[1::4])*1.2
-        x = np.linspace(xmin, xmax, 300)
-    if not ponderation:
-        ponderation=np.asarray(initial_peak_params)/5 + 1
-    else:
-        ponderation = np.asarray(ponderation)
-    nn = len(initial_peak_params)
-    peaks_params = (1 + (np.random.rand(N, nn) - 0.5) / ponderation) \
-                    * np.asarray(initial_peak_params)
 
-    spectra = np.asarray([(multi_pV(x, *peaks_params[i]) + (np.random.random(len(x))-0.5)*5) * (1 + (np.random.random(len(x))-0.5)/20) for i in range(N)])
+    def binarization_load(f, shape=(132,132)):
+        '''May be used if "linea" mode is active'''
+        im = io.imread(f, as_gray=True)
+        return transform.resize(im, shape, anti_aliasing=True)
 
-    return spectra, x
+    # We need to make sure that all the sublists are of the same length.
+    # If that is not the case, we need to fill the sublists with the default
+    # values.
+    if defaults == None:
+        defaults = [np.median([pp[0] for pp in initial_peak_params]),
+                    np.median(x),
+                    np.ptp(x)/20,
+                    0.5]
+    for i, par in enumerate(initial_peak_params):
+        while len(par)<len(defaults):
+            initial_peak_params[i].append(defaults[len(par)])
+    n_peaks = len(initial_peak_params) # Number of peaks
+    ponderation = 1 + (np.random.rand(N, len(defaults), 1) - 0.5) * noise
+    peaks_params = ponderation * np.asarray(initial_peak_params)
+    # -------- The funny part ----------------------------------
+    if noise_bias == 'smiley':
+        smile = io.imread('./misc/bibi.jpg')
+        x_dim = int(np.sqrt(N))
+        y_dim = N//x_dim
+        print(f"You'll end up with {x_dim}*{y_dim} = {x_dim*y_dim} points"
+              f"instead of initial {N}")
+        N = x_dim * y_dim
+        smile_resized = transform.resize(smile, (x_dim, y_dim))
+        noise_bias = smile_resized.ravel()
+        if funny_peak == 'random':
+            funny_peak = np.random.randint(0, n_peaks+1)
+        elif funny_peak == 'all':
+            funny_peak = list(range(n_peaks))
+        peaks_params[:,funny_peak,0] *= noise_bias
+    elif noise_bias == 'linea':
+        x_dim = int(np.sqrt(N))
+        y_dim = N//x_dim
+        images = './misc/linea/*.jpg'
+        coll_all = io.ImageCollection(images, load_func=binarization_load,
+                                      shape=(x_dim, y_dim))
+        print(f"You'll end up with {x_dim}*{y_dim} = {x_dim*y_dim} points"
+              f"instead of initial {N}")
+        N = x_dim * y_dim
+    # -------- The End of the funny part ------------------------
+    additive_noise = peaks_params[:,:,0].mean() *\
+                         (0.5+np.random.rand(len(x))) / 5
+    spectra = np.asarray(
+               [multi_pV(x, peaks_params[i]) +\
+                additive_noise[np.random.permutation(len(x))] \
+                    for i in range(N)])
+    if isinstance(noise_bias, str) and noise_bias == 'linea':
+        noise_bias = coll_all.concatenate().reshape(110, -1)
+        spectra[:, -110:] *= noise_bias.T
+
+    return spectra.reshape(N, -1)
+
+
 # %%
 
 class AllMaps(object):
@@ -790,8 +909,8 @@ class fitonclick(object):
                                 gid=str(self.peak_counter)))
         self.artists.append(one_elipsis)
         self.pic['line'].append(self.ax.plot(self.x, yy,
-                                alpha=0.75, lw=2.5,
-                                picker=5))
+                                alpha=0.75, lw=2.5))
+        self.pic['line'][-1][0].set_pickradius(5)
         # ax.set_ylim(auto=True)
         self.pic['h'].append(h)
         self.pic['x0'].append(x0)

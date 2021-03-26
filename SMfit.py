@@ -20,7 +20,7 @@ from copy import copy
 from itertools import chain
 from scipy.optimize import curve_fit
 from utilities import fitonclick, pV
-from utilities import multi_peak as fitting_function
+from utilities import multi_pV as fitting_function
 plt.style.use('bmh')
 
 figsize = (12, 10)
@@ -30,13 +30,13 @@ figsize = (12, 10)
 # You should provide x and y as numpy arrays of shape ("length of data", )
 # For example: >>> x, y = np.loadtxt("your_file_containing_data.txt")
 
-dummy_params = [51, 200, 85, 0.3,
-                10, 272, 37, 0.8,
-                2.7, 317, 39, 0.52,
-                3.9, 471, 62, 0.25]
+dummy_params = [[51, 200, 85, 0.3],
+                [10, 272, 37, 0.8],
+                [2.7, 317, 39, 0.52],
+                [3.9, 471, 62, 0.25]]
 
 dummy_x = np.arange(0, 584, 1.34)
-dummy_y = fitting_function(dummy_x, *dummy_params)
+dummy_y = fitting_function(dummy_x, dummy_params)
 dummy_y += np.random.random(len(dummy_x))*np.mean(dummy_y)/5
 
 
@@ -60,8 +60,8 @@ pic = mfit.pic
 # (as a list of lists)
 manualfit_components_params = copy(list(map(list, zip(
                             pic['h'], pic['x0'], pic['w'], pic['GL']))))
-# to transform the list of lists into one single list:
-manualfit_components_params = list(chain(*manualfit_components_params))
+# # to transform the list of lists into one single list:
+# manualfit_components_params = list(chain(*manualfit_components_params))
 
 # the sum of manually created peaks:
 assert len(mfit.sum_peak) > 0, 'No peaks initiated'
@@ -73,31 +73,31 @@ manualfit = mfit.sum_peak[0][0].get_ydata()
 # but leaving it as it is should be ok for basic usage)
 
 # set the initial bounds as infinities:
-upper_bounds = np.ones(len(manualfit_components_params))*np.inf
-lower_bounds = np.ones(len(manualfit_components_params))*(-np.inf)
+upper_bounds = np.ones_like(manualfit_components_params)*np.inf
+lower_bounds = np.ones_like(manualfit_components_params)*(-np.inf)
 
 # setting reasonable bounds for the peak amplitude
 # as a portion to your initial manual estimate
-upper_bounds[0::4] = [A*1.4 for A in manualfit_components_params[0::4]]
-lower_bounds[0::4] = [A*0.7 for A in manualfit_components_params[0::4]]
+upper_bounds[:, 0] = np.asarray([A[0]*1.4 for A in manualfit_components_params])
+lower_bounds[:, 0] = np.asarray([A[0]*0.7 for A in manualfit_components_params])
 
 # setting reasonable bounds for the peak position
 # as a shift in regard to your initial manual position
-upper_bounds[1::4] = \
-    [shift + 2*x_size for shift in manualfit_components_params[1::4]]
-lower_bounds[1::4] = \
-    [shift - 2*x_size for shift in manualfit_components_params[1::4]]
+upper_bounds[:, 1] = \
+    np.asarray([A[1] + 2*x_size for A in manualfit_components_params])
+lower_bounds[:, 1] = \
+    np.asarray([A[1] - 2*x_size for A in manualfit_components_params])
 
 # setting the bounds for the widths
-upper_bounds[2::4] = \
-    [width*16 for width in manualfit_components_params[2::4]]
-lower_bounds[2::4] = \
-    [width*0.5 for width in manualfit_components_params[2::4]]
+upper_bounds[:, 2] = \
+    np.asarray([A[2]*16 for A in manualfit_components_params])
+lower_bounds[:, 2] = \
+    np.asarray([A[2]*0.5 for A in manualfit_components_params])
 
 
 # setting the bounds for the lorentz/gauss ratio
-upper_bounds[3::4] = 1
-lower_bounds[3::4] = 0
+upper_bounds[:, 3] = 1
+lower_bounds[:, 3] = 0
 
 
 bounds = (lower_bounds, upper_bounds)
@@ -108,10 +108,11 @@ bounds = (lower_bounds, upper_bounds)
 # The curve-fitting part:
 fitted_params, b = curve_fit(fitting_function, x, y,
                              p0=manualfit_components_params,
-                             absolute_sigma=False, bounds=bounds)
+                             absolute_sigma=False)#, bounds=bounds)
+#%%
 fitting_err = np.sqrt(np.diag(b))
 
-y_fitted = fitting_function(x, *fitted_params)
+y_fitted = fitting_function(x, fitted_params)
 # %%
 # Plotting the results of the optimization:
 figg, axx, = plt.subplots(figsize=figsize)
