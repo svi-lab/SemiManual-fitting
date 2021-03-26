@@ -17,7 +17,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from copy import copy
-from itertools import chain
 from scipy.optimize import curve_fit
 from utilities import fitonclick, pV
 from utilities import multi_pV as fitting_function
@@ -30,13 +29,13 @@ figsize = (12, 10)
 # You should provide x and y as numpy arrays of shape ("length of data", )
 # For example: >>> x, y = np.loadtxt("your_file_containing_data.txt")
 
-dummy_params = [[51, 200, 85, 0.3],
-                [10, 272, 37, 0.8],
-                [2.7, 317, 39, 0.52],
-                [3.9, 471, 62, 0.25]]
+dummy_params = [51, 200, 85, 0.3,
+                10, 272, 37, 0.8,
+                2.7, 317, 39, 0.52,
+                3.9, 471, 62, 0.25]
 
 dummy_x = np.arange(0, 584, 1.34)
-dummy_y = fitting_function(dummy_x, dummy_params)
+dummy_y = fitting_function(dummy_x, *dummy_params)
 dummy_y += np.random.random(len(dummy_x))*np.mean(dummy_y)/5
 
 
@@ -100,19 +99,19 @@ upper_bounds[:, 3] = 1
 lower_bounds[:, 3] = 0
 
 
-bounds = (lower_bounds, upper_bounds)
+bounds = (lower_bounds.ravel(), upper_bounds.ravel())
 
 
 # In[7]:
-
+mfcp = np.asarray(manualfit_components_params).ravel()
 # The curve-fitting part:
-fitted_params, b = curve_fit(fitting_function, x, y,
-                             p0=manualfit_components_params,
-                             absolute_sigma=False)#, bounds=bounds)
+fitted_params, b = curve_fit(fitting_function, x, y, method='trf',
+                             p0=mfcp,
+                             absolute_sigma=False, bounds=bounds)
 #%%
 fitting_err = np.sqrt(np.diag(b))
 
-y_fitted = fitting_function(x, fitted_params)
+y_fitted = fitting_function(x, *fitted_params)
 # %%
 # Plotting the results of the optimization:
 figg, axx, = plt.subplots(figsize=figsize)
@@ -166,7 +165,7 @@ parametar_names = ['Height', 'Center', 'FWMH', 'Ratio Gauss/Lorenz']
 print(f"{'Your initial guess':>47s}{'After fitting':>19s}\n")
 for i in range(len(fitted_params)):
     print(f"Peak {i//4}|   {parametar_names[i%4]:<20s}: "
-          f" {manualfit_components_params[i]:8.2f}     ->    "
+          f" {mfcp[i]:8.2f}     ->    "
           f" {fitted_params[i]:6.2f} \U000000B1 {fitting_err[i]:4.2f}")
 # %%
 # Deleting the class instance, in case you want to start over

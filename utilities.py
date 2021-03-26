@@ -428,17 +428,18 @@ def multi_pV(x, *params, peak_function=pV):
 
     >>> x = np.linspace(150, 1300, 1015) # Create 1015 equally spaced points
     >>> mpar = [[40, 220, 100], [122, 440, 80], [164, 550, 160], [40, 480, 340]]
-    >>> plt.plot(x, multi_pV(x, mpar))
+    >>> plt.plot(x, multi_pV(x, *mpar))
     '''
     result = np.zeros_like(x, dtype=np.float)
-    print(params)
-    for pp in params:
+    n_peaks = int((len(params)+0.1)/4) # Number of peaks
+    ipp = np.asarray(params).reshape(n_peaks, 4)
+    for pp in ipp:
         result += peak_function(x, *pp)  # h, x0, w, r)
     return result
 
 
-def create_multiple_spectra(x:np.ndarray, initial_peak_params:list,
-                            defaults=None, N=10000, noise:float=0.02,
+def create_multiple_spectra(x:np.ndarray, *initial_peak_params:list,
+                            N=10000, noise:float=0.02,
                             spectrum_function=multi_pV,
                             noise_bias='linea', funny_peak='random'):
     '''Creates N different spectra using mutli_pV function.
@@ -447,7 +448,7 @@ def create_multiple_spectra(x:np.ndarray, initial_peak_params:list,
     ----------------
         x : np.ndarray
             1D ndarray - independent variable
-        initial_peak_params: list[float]
+        initial_peak_params: list
             The list of sublists containing individual peak parameters as
             demanded by the `spectrum_function`.
         defaults: list, optional
@@ -484,26 +485,16 @@ def create_multiple_spectra(x:np.ndarray, initial_peak_params:list,
     >>> mpar = [[40, 220, 100], [122, 440, 80], [164, 550, 160], [40, 480, 340]]
     >>> my_spectra = create_multiple_spectra(x, mpar)
     '''
-
     def binarization_load(f, shape=(132,132)):
         '''May be used if "linea" mode is active'''
         im = io.imread(f, as_gray=True)
         return transform.resize(im, shape, anti_aliasing=True)
 
-    # We need to make sure that all the sublists are of the same length.
-    # If that is not the case, we need to fill the sublists with the default
-    # values.
-    if defaults == None:
-        defaults = [np.median([pp[0] for pp in initial_peak_params]),
-                    np.median(x),
-                    np.ptp(x)/20,
-                    0.5]
-    for i, par in enumerate(initial_peak_params):
-        while len(par)<len(defaults):
-            initial_peak_params[i].append(defaults[len(par)])
-    n_peaks = len(initial_peak_params) # Number of peaks
-    ponderation = 1 + (np.random.rand(N, len(defaults), 1) - 0.5) * noise
-    peaks_params = ponderation * np.asarray(initial_peak_params)
+
+    n_peaks = int((len(initial_peak_params)+0.1)/4) # Number of peaks
+    ipp = initial_peak_params.reshape(n_peaks, 4)
+    ponderation = 1 + (np.random.rand(N, n_peaks, 1) - 0.5) * noise
+    peaks_params = ponderation * ipp
     # -------- The funny part ----------------------------------
     if noise_bias == 'smiley':
         smile = io.imread('./misc/bibi.jpg')
