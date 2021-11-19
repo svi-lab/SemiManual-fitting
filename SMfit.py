@@ -16,6 +16,7 @@
 # In[1]:
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Ellipse
 from copy import copy
 from scipy.optimize import curve_fit
 from utilities import fitonclick, pV
@@ -78,7 +79,7 @@ lower_bounds = np.ones_like(manualfit_components_params)*(-np.inf)
 # setting reasonable bounds for the peak amplitude
 # as a portion to your initial manual estimate
 upper_bounds[:, 0] = np.asarray([A[0]*1.4 for A in manualfit_components_params])
-lower_bounds[:, 0] = np.asarray([A[0]*0.7 for A in manualfit_components_params])
+lower_bounds[:, 0] = np.asarray([A[0]*0.5 for A in manualfit_components_params])
 
 # setting reasonable bounds for the peak position
 # as a shift in regard to your initial manual position
