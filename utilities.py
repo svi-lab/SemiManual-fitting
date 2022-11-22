@@ -20,121 +20,6 @@ from scipy.ndimage import median_filter
 from scipy.optimize import minimize_scalar
 from skimage import io, transform
 
-class AdjustCR_SearchSensitivity(object):
-    """Allows to visually set the sensitivity for the Cosmic Rays detection.
-    The graph shows the number and the distribution of CR candidates along the
-    Raman shifts' axis. You can manually adjust the sensitivity
-    (left=more sensitive, right=less sensitive)
-
-    The usage example is the following:
-    ---------------------------------------
-    >>># first you show the graph and set for the appropriate sensitivity value:
-    >>>my_class_instance = AdjustCR_SearchSensitivity(spectra, x_values=sigma)
-    >>># Once you're satisfied with the result, you should recover the following
-    >>># values:
-    >>>CR_spectra_ind = my_class_instance.CR_spectra_ind
-    >>>mask_CR_cand = my_class_instance.mask_CR_cand
-    >>>mask_whole = my_class_instance.mask_whole
-
-    The recovered values are:
-    CR_spectra_ind: 1D ndarray of ints: The indices of the spectra containing
-                                        the Cosmic Rays.
-                                        It's length is the number of CRs found.
-    mask_CR_cand: 2D ndarray of bools:  Boolean mask of the same shape as the
-                                        spectra containing the CRs.
-                                        shape = (len(CR_spectra_ind), len(x_values))
-                                        Is True in the zone containing the CR.
-    mask_whole: 2D ndarray of bools::   Boolean mask of the same shape as the
-                                        input spectra. True where the CRs are.
-    """
-
-
-
-    def __init__(self, spectra, x_values=None, gradient_axis=-1):
-        self.osa = gradient_axis
-        self.spectra = spectra
-        if x_values is None:
-            self.x_values = np.arange(self.spectra.shape[-1])
-        else:
-            self.x_values = x_values
-        assert len(x_values) == self.spectra.shape[-1], "wtf dude?"
-        self.fig, self.ax = plt.subplots()
-        # third gradient of the spectra (along the wavenumbers)
-        self.nabla = np.gradient(np.gradient(np.gradient(self.spectra,
-                                                         axis=self.osa),
-                                             axis=self.osa),
-                                 axis=self.osa) # third gradient
-        self.nabla_dev = np.std(self.nabla, axis=self.osa)
-        # Create some space for the slider:
-        self.fig.subplots_adjust(bottom=0.19, right=0.89)
-        self.axcolor = 'lightgoldenrodyellow'
-        self.axframe = self.fig.add_axes([0.15, 0.1, 0.7, 0.03],
-                                         facecolor=self.axcolor)
-        self.sframe = Slider(self.axframe, 'Sensitivity',
-                             1, 22,
-                             valinit=8, valfmt='%.1f', valstep=0.1)
-        self.sframe.on_changed(self.update) # calls the "update" function when changing the slider position
-        # Calling the "press" function on keypress event
-        # (only arrow keys left and right work)
-        self.fig.canvas.mpl_connect('key_press_event', self.press)
-        self.CR_spectra_ind, self.mask_whole, self.mask_CR_cand = self.calculate_mask(8)
-        self.line, = self.ax.plot(self.x_values, np.sum(self.mask_whole, axis=-0))
-        self.ax.set_title(f"Found {len(self.CR_spectra_ind)} cosmic rays")
-        plt.show()
-
-    def calculate_mask(self, CR_coeff):
-        self.uslov=CR_coeff*self.nabla_dev[:, np.newaxis]
-        # find the indices of the potential CR candidates:
-        self.cand_spectra, self.cand_sigma =\
-                                    np.nonzero(np.abs(self.nabla) > self.uslov)
-
-        # indices of spectra containing the CR candidates:
-        self.CR_spectra_ind = np.unique(self.cand_spectra)
-        # we construct the mask with zeros everywhere except on the positions of CRs:
-        self.mask_whole = np.zeros_like(self.spectra, dtype=bool)
-        self.mask_whole[self.cand_spectra, self.cand_sigma] = True
-        # we now dilate the mask:
-        self.ws = int(self.spectra.shape[-1]/10) # the size of the window depends on resolution
-        self.mask_CR_cand = scipy.ndimage.morphology.binary_dilation(
-                                self.mask_whole[self.CR_spectra_ind],
-                                structure=np.ones((1,self.ws)))
-        self.mask_whole[self.CR_spectra_ind] = self.mask_CR_cand
-        return self.CR_spectra_ind, self.mask_whole, self.mask_CR_cand
-
-
-
-
-    def update(self, val):
-        '''This function is for using the slider to scroll through frames'''
-        self.CR_coeff = self.sframe.val
-        self.CR_spectra_ind, self.mask_whole, self.mask_CR_cand =\
-                                            self.calculate_mask(self.CR_coeff)
-        self.line.set_ydata(np.sum(self.mask_whole, axis=-0))
-        self.ax.relim()
-        self.ax.autoscale_view()
-        self.ax.set_title(f"Found {len(self.CR_spectra_ind)} cosmic rays")
-        self.fig.canvas.draw_idle()
-
-    def press(self, event):
-        '''This function is to use arrow keys left and right to scroll
-        through frames one by one'''
-        frame = self.sframe.val
-        if event.key == 'left' and frame > 1:
-            new_frame = frame - 0.1
-        elif event.key == 'right' and frame < 22:
-            new_frame = frame + 0.1
-        else:
-            new_frame = frame
-        self.sframe.set_val(new_frame)
-        self.CR_coeff = new_frame
-        self.CR_spectra_ind, self.mask_whole, self.mask_CR_cand =\
-                                            self.calculate_mask(self.CR_coeff)
-        self.line.set_ydata(np.sum(self.mask_whole, axis=-0))
-        self.ax.relim()
-        self.ax.autoscale_view()
-        self.ax.set_title(f"Found {len(self.CR_spectra_ind)} cosmic rays")
-        self.fig.canvas.draw_idle()
-
 
 def find_barycentre(x, y, method="trapz_minimize"):
     '''Calculates the index of the barycentre value.
@@ -147,49 +32,44 @@ def find_barycentre(x, y, method="trapz_minimize"):
         ---------
         (x_value, y_value): the coordinates of the barycentre
         '''
-    assert(method in ['trapz_minimize'])#, 'sum_minimize', 'trapz_list'])
-    #razlika = np.asarray(np.diff(x, append=x[-1]+x[-1]-x[-2]), dtype=np.float16)
-    #assert(np.all(razlika/razlika[np.random.randint(len(x))] == np.ones_like(x))),\
-    #"your points are not equidistant"
+    assert(method in ['trapz_minimize'])
     half = np.trapz(y, x=x)/2
-    #from scipy.interpolate import interp1d
-    #xx=np.linspace(x.min(), x.max(), 2*len(x))
-    #f = interp1d(x, y, kind='quadratic')
-    #yy = f(xx)
     if method in 'trapz_minimize':
         def find_y(Y0, xx=x, yy=y, method=method):
             '''Internal function to minimize
             depending on the method chosen'''
             # Calculate the area of the curve above the Y0 value:
-            part_up = np.trapz(yy[yy>=Y0]-Y0, x=xx[yy>=Y0])
+            part_up = np.trapz(yy[yy >= Y0] - Y0, x=xx[yy >= Y0])
             # Calculate the area below Y0:
-            part_down = np.trapz(yy[yy<=Y0], x=xx[yy<=Y0])
+            part_down = np.trapz(yy[yy <= Y0], x=xx[yy <= Y0])
             # for the two parts to be the same
             to_minimize_ud = np.abs(part_up - part_down)
             # fto make the other part be close to half
             to_minimize_uh = np.abs(part_up - half)
             # to make the other part be close to half
             to_minimize_dh = np.abs(part_down - half)
-            return to_minimize_ud**2+to_minimize_uh+to_minimize_dh
+            return to_minimize_ud**2 + to_minimize_uh + to_minimize_dh
 
         def find_x(X0, xx=x, yy=y, method=method):
-            part_left = np.trapz(yy[xx<=X0], x=xx[xx<=X0])
-            part_right = np.trapz(yy[xx>=X0], x=xx[xx>=X0])
+            part_left = np.trapz(yy[xx <= X0], x=xx[xx <= X0])
+            part_right = np.trapz(yy[xx >= X0], x=xx[xx >= X0])
             to_minimize_lr = np.abs(part_left - part_right)
             to_minimize_lh = np.abs(part_left - half)
             to_minimize_rh = np.abs(part_right - half)
-            return to_minimize_lr**2+to_minimize_lh+to_minimize_rh
+            return to_minimize_lr**2 + to_minimize_lh + to_minimize_rh
 
         minimized_y = minimize_scalar(find_y, method='Bounded',
-                                    bounds=(np.quantile(y, 0.01),
-                                            np.quantile(y, 0.99)))
+                                      bounds=(np.quantile(y, 0.01),
+                                              np.quantile(y, 0.99)))
         minimized_x = minimize_scalar(find_x, method='Bounded',
-                                    bounds=(np.quantile(x, 0.01),
-                                            np.quantile(x, 0.99)))
+                                      bounds=(np.quantile(x, 0.01),
+                                              np.quantile(x, 0.99)))
         y_value = minimized_y.x
         x_value = minimized_x.x
 
     elif method == "list_minimize":
+        yy = y
+        xx = x
         ys = np.sort(yy)
         z2 = np.asarray(
             [np.abs(np.trapz(yy[yy<=y_val], x=xx[yy<=y_val]) -\
@@ -200,26 +80,6 @@ def find_barycentre(x, y, method="trapz_minimize"):
         x_value = xx[x_ind]
 
     return x_value, y_value
-
-
-def rolling_median(arr, w_size, ax=0, mode='nearest', *args):
-    '''Calculates the rolling median of an array
-    along the given axis on the given window size.
-    Parameters:
-    -------------
-        arr:ndarray: input array
-        w_size:int: the window size
-                    (should be less then the dimension along the given axis)
-        ax:int: the axis along which to calculate the rolling median
-        mode:str: to choose from ['reflect', 'constant', 'nearest', 'mirror', 'wrap']
-        see the docstring of ndimage.median_filter for details
-    Returns:
-    ------------
-        ndarray of same shape as the input array'''
-    shape = np.ones(np.ndim(arr), dtype=int)
-    shape[ax] = w_size
-    return median_filter(arr, size=shape, mode=mode, *args)
-
 
 
 def baseline_als(y, lam=1e5, p=5e-5, niter=12):
@@ -264,11 +124,11 @@ def baseline_als(y, lam=1e5, p=5e-5, niter=12):
         if z is None:
             L = yi.shape[-1]
             D = sparse.diags([1, -2, 1], [0, -1, -2], shape=(L, L-2))
-            D = lam * D.dot(D.transpose()) # Precompute this term since it does not depend on `w`
+            D = lam * D.dot(D.transpose())  # Precompute this term since it does not depend on `w`
             w = np.ones(L)
             W = sparse.spdiags(w, 0, L, L)
         for i in range(niter):
-            W.setdiag(w) # Do not create a new matrix, just update diagonal values
+            W.setdiag(w)  # Do not create a new matrix, just update diagonal values
             Z = W + D
             z = sparse.linalg.spsolve(Z, w*yi)
             w = p * (yi > z) + (1-p) * (yi < z)
@@ -344,8 +204,9 @@ def slice_lr(spectra, sigma=None, pos_left=None, pos_right=None):
 
     return spectra_kept, sigma_kept
 
-#%%
-def pV(x:np.ndarray, h:float, x0:float=None, w:float=None, factor:float=0.5):
+
+def pV(x: np.ndarray, h: float, x0: float = None,
+       w: float = None, factor: float = 0.5):
     '''Creates an pseudo-Voigt profile.
 
     Parameters:
@@ -387,13 +248,13 @@ def pV(x:np.ndarray, h:float, x0:float=None, w:float=None, factor:float=0.5):
         return((1/np.pi)*(w/2) / (
                 (x - x0)**2 + (w/2)**2))
 
-    if x0 == None:
+    if x0 is None:
         x0 = x[int(len(x)/2)]
-    if w == None:
+    if w is None:
         w = (x.max() - x.min()) / 3
 
     intensity = h * np.pi * (w/2) /\
-                    (1 + factor * (np.sqrt(np.pi*np.log(2)) - 1))
+        (1 + factor * (np.sqrt(np.pi*np.log(2)) - 1))
 
     return(intensity * (factor * Gauss(x, w)
                         + (1-factor) * Lorentz(x, w)))
@@ -431,18 +292,18 @@ def multi_pV(x, *params, peak_function=pV):
     >>> plt.plot(x, multi_pV(x, *mpar))
     '''
     result = np.zeros_like(x, dtype=np.float)
-    n_peaks = int((len(params)+0.1)/4) # Number of peaks
+    n_peaks = int((len(params)+0.1)/4)  # Number of peaks
     ipp = np.asarray(params).reshape(n_peaks, 4)
     for pp in ipp:
         result += peak_function(x, *pp)  # h, x0, w, r)
     return result
 
 
-def create_multiple_spectra(x:np.ndarray, *initial_peak_params:list,
-                            N=10000, noise:float=0.02,
+def create_multiple_spectra(x: np.ndarray, *initial_peak_params: list,
+                            N=10000, noise: float = 0.02,
                             spectrum_function=multi_pV,
                             noise_bias='linea', funny_peak='random'):
-    '''Creates N different spectra using mutli_pV function.
+    """Creates N different spectra using mutli_pV function.
 
     Params:
     ----------------
@@ -481,17 +342,17 @@ def create_multiple_spectra(x:np.ndarray, *initial_peak_params:list,
     >>> import numpy as np
     >>> import matplotlib.pyplot as plt
 
-    >>> x = np.linspace(150, 1300, 1015) # Create 1015 equally spaced points
+    >>> x = np.linspace(150, 1300, 1015)  # Create 1015 equally spaced points
     >>> mpar = [[40, 220, 100], [122, 440, 80], [164, 550, 160], [40, 480, 340]]
     >>> my_spectra = create_multiple_spectra(x, mpar)
-    '''
-    def binarization_load(f, shape=(132,132)):
+    """
+
+    def binarization_load(f, shape=(132, 132)):
         '''May be used if "linea" mode is active'''
         im = io.imread(f, as_gray=True)
         return transform.resize(im, shape, anti_aliasing=True)
 
-
-    n_peaks = int((len(initial_peak_params)+0.1)/4) # Number of peaks
+    n_peaks = int((len(initial_peak_params) + 0.1) / 4)  # Number of peaks
     ipp = initial_peak_params.reshape(n_peaks, 4)
     ponderation = 1 + (np.random.rand(N, n_peaks, 1) - 0.5) * noise
     peaks_params = ponderation * ipp
@@ -509,7 +370,7 @@ def create_multiple_spectra(x:np.ndarray, *initial_peak_params:list,
             funny_peak = np.random.randint(0, n_peaks+1)
         elif funny_peak == 'all':
             funny_peak = list(range(n_peaks))
-        peaks_params[:,funny_peak,0] *= noise_bias
+        peaks_params[:, funny_peak, 0] *= noise_bias
     elif noise_bias == 'linea':
         x_dim = int(np.sqrt(N))
         y_dim = N//x_dim
@@ -520,20 +381,18 @@ def create_multiple_spectra(x:np.ndarray, *initial_peak_params:list,
               f"instead of initial {N}")
         N = x_dim * y_dim
     # -------- The End of the funny part ------------------------
-    additive_noise = peaks_params[:,:,0].mean() *\
-                         (0.5+np.random.rand(len(x))) / 5
+    additive_noise = peaks_params[:, :, 0].mean() *\
+        (0.5 + np.random.rand(len(x))) / 5
     spectra = np.asarray(
-               [multi_pV(x, peaks_params[i]) +\
-                additive_noise[np.random.permutation(len(x))] \
-                    for i in range(N)])
+               [multi_pV(x, peaks_params[i]) +
+                additive_noise[np.random.permutation(len(x))]
+                for i in range(N)])
     if isinstance(noise_bias, str) and noise_bias == 'linea':
         noise_bias = coll_all.concatenate().reshape(110, -1)
         spectra[:, -110:] *= noise_bias.T
 
     return spectra.reshape(N, -1)
 
-
-# %%
 
 class AllMaps(object):
     '''
@@ -543,25 +402,28 @@ class AllMaps(object):
     "components" parameter.
 
     Parameters:
-        map_spectra:3D ndarray : the spectra shaped as
-                                (n_lines, n_columns, n_wavenumbers)
+        map_spectra:3D ndarray
+            the spectra shaped as (n_lines, n_columns, n_wavenumbers)
         sigma:1D ndarray : an array of wavenumbers (len(sigma)=n_wavenumbers)
-        components: 2D ndarray : The most evident use-case would be to
-                    help visualize the decomposition results from PCA or NMF.
-                    In this case, the function will plot the component with
-                    the corresponding map visualization of the given components'
-                    presence in each of the points in the map.
-                    So, in this case, your map_spectra would be for example
-                    the matrix of components' contributions in each spectrum, while
-                    the "components" array will be your actual components.
-                    In this case you can ommit your sigma values or set them to
-                    something like np.arange(n_components)
-        components_sigma: 1D ndarray: in the case explained above, this would be the
-                    actual wavenumbers
-        **kwargs: dict: can only take 'title' as a key for the moment
+        components: 2D ndarray
+            The most evident use-case would be to
+            help visualize the decomposition results from PCA or NMF.
+            In this case, the function will plot the component with the
+            corresponding map visualization of the given components'
+            presence in each of the points in the map.
+            So, in this case, your map_spectra would be for example
+            the matrix of components' contributions in each spectrum,
+            while the "components" array will be your actual components.
+            In this case you can ommit your sigma values or set them to
+            something like np.arange(n_components)
+        components_sigma: 1D ndarray
+            in the case explained above, this would be the
+            actual wavenumbers
+        **kwargs: dict
+            can only take 'title' as a key for the moment
 
-        Returns: The interactive visualization (you can scroll through sigma values
-                    with a slider, or using left/right keyboard arrows)
+        Returns: The interactive visualization (you can scroll through
+            sigma values with a slider, or using left/right keyboard arrows)
     '''
 
     def __init__(self, map_spectra, sigma=None, components=None, components_sigma=None, **kwargs):
@@ -608,11 +470,9 @@ class AllMaps(object):
                              self.first_frame, self.last_frame,
                              valinit=self.first_frame, valfmt='%d', valstep=1)
 
-
-
         self.my_cbar = mpl.colorbar.colorbar_factory(self.cbax, self.im)
 
-        self.sframe.on_changed(self.update) # calls the "update" function when changing the slider position
+        self.sframe.on_changed(self.update)  # calls the "update" function when changing the slider position
         # Calling the "press" function on keypress event
         # (only arrow keys left and right work)
         self.fig.canvas.mpl_connect('key_press_event', self.press)
@@ -634,9 +494,9 @@ class AllMaps(object):
     def update(self, val):
         '''This function is for using the slider to scroll through frames'''
         frame = int(self.sframe.val)
-        img = self.map_spectra[:,:,frame]
+        img = self.map_spectra[:, :, frame]
         self.im.set_data(img)
-        self.im.set_clim(np.percentile(img, [1,99]))
+        self.im.set_clim(np.percentile(img, [1, 99]))
         if self.components is not None:
             self.line.set_ydata(self.components[frame])
             self.ax2.relim()
@@ -655,9 +515,9 @@ class AllMaps(object):
         else:
             new_frame = frame
         self.sframe.set_val(new_frame)
-        img = self.map_spectra[:,:,new_frame]
+        img = self.map_spectra[:, :, new_frame]
         self.im.set_data(img)
-        self.im.set_clim(np.percentile(img, [1,99]))
+        self.im.set_clim(np.percentile(img, [1, 99]))
         self.titled(new_frame)
         if self.components is not None:
             self.line.set_ydata(self.components[new_frame])
@@ -667,150 +527,9 @@ class AllMaps(object):
 
 
 # %%
+def set_size(variable, rapport=70):
+    return (variable.max() - variable.min())/rapport
 
-class NavigationButtons(object):
-    '''This class allows you to visualize multispectral data and
-    navigate trough your spectra simply by clicking on the
-    navigation buttons on the graph.
-    -------------------
-    Parameters:
-        sigma: 1D numpy array of your x-values (raman shifts, par ex.)
-        spectra: 3D or 2D ndarray of shape (n_spectra, len(sigma), n_curves).
-                 The last dimension may be ommited it there is only one curve
-                 to be plotted for each spectra),
-        autoscale: bool determining if you want to adjust the scale to each spectrum
-        title: The initial title describing where the spectra comes from
-        label: list: A list explaining each of the curves. len(label) = n_curves
-    Output:
-        matplotlib graph with navigation buttons to cycle through spectra
-    Example:
-    # Let's say you have a ndarray containing 10 spectra, each 500 points long
-    # base_spectras.shape should give (10, 500)
-    # your sigma.shape should be (500, )
-    # Then let's say you fitted each of your spectra with 3 gaussian peaks
-    # and you want to plot these as well. For each of your ten spectra,
-    # you will have something like:
-    >>>spectra_fitted[i] = multiple_gaussian_function(sigma, *params[i])
-    # your spectra_fitted should have the same shape as your spectra.
-    # Now, let's say you want also to plot each of the gaussian peaks as well
-    # for "i"th spectra you will have 3 gaussians
-    >>>for k in range(3):
-    >>>G[i][k] = single_gaussian_function(sigma, *params[i][k])
-    # At the end, you stack all of this in one ndarray :
-    >>>multiple_curves_to_plot = np.stack((
-            base_spectras, spectra_fitted, G1, G2, G3), axis=-1)
-    >>>NavigationButtons(sigma, multiple_curves_to_plot)
-    '''
-    ind = 0
-
-    def __init__(self, sigma, spectra, autoscale_y=False, title='Spectrum', label=False,
-                 **kwargs):
-        self.y_autoscale = autoscale_y
-
-        if len(spectra.shape) == 2:
-            self.s = spectra[:,:, np.newaxis]
-        elif len(spectra.shape) == 3:
-            self.s = spectra
-        else:
-            raise ValueError("Check the shape of your spectra.\n"
-                             "It should be (n_spectra, n_points, n_curves)\n"
-                             "(this last dimension might be ommited if it's equal to one)")
-        self.n_spectra = self.s.shape[0]
-        if isinstance(title, list) or isinstance(title, np.ndarray):
-            if len(title) == spectra.shape[0]:
-                self.title = title
-            else:
-                raise ValueError(f"you have {len(title)} titles,\n"
-                                f"but you have {len(spectra)} spectra")
-        else:
-            self.title = [title]*self.n_spectra
-
-        self.sigma = sigma
-        if label:
-            if len(label)==self.s.shape[2]:
-                self.label = label
-            else:
-                warn("You should check the length of your label list.\nFalling on to default labels...")
-                self.label = ["Curve n°"+str(numb) for numb in range(self.s.shape[2])]
-        else:
-            self.label = ["Curve n°"+str(numb) for numb in range(self.s.shape[2])]
-
-        self.figr, self.axr = plt.subplots(**kwargs)
-        self.axr.set_title(f'{title[0]}')
-        self.figr.subplots_adjust(bottom=0.2)
-        self.l = self.axr.plot(self.sigma, self.s[0], lw=2, alpha=0.7) # l potentially contains multiple lines
-        self.axr.legend(self.l, self.label)
-        self.axprev1000 = plt.axes([0.097, 0.05, 0.1, 0.04])
-        self.axprev100 = plt.axes([0.198, 0.05, 0.1, 0.04])
-        self.axprev10 = plt.axes([0.299, 0.05, 0.1, 0.04])
-        self.axprev1 = plt.axes([0.4, 0.05, 0.1, 0.04])
-        self.axnext1 = plt.axes([0.501, 0.05, 0.1, 0.04])
-        self.axnext10 = plt.axes([0.602, 0.05, 0.1, 0.04])
-        self.axnext100 = plt.axes([0.703, 0.05, 0.1, 0.04])
-        self.axnext1000 = plt.axes([0.804, 0.05, 0.1, 0.04])
-
-        self.bprev1000 = Button(self.axprev1000, 'Prev.1000')
-        self.bprev1000.on_clicked(self.prev1000)
-        self.bprev100 = Button(self.axprev100, 'Prev.100')
-        self.bprev100.on_clicked(self.prev100)
-        self.bprev10 = Button(self.axprev10, 'Prev.10')
-        self.bprev10.on_clicked(self.prev10)
-        self.bprev = Button(self.axprev1, 'Prev.1')
-        self.bprev.on_clicked(self.prev1)
-        self.bnext = Button(self.axnext1, 'Next1')
-        self.bnext.on_clicked(self.next1)
-        self.bnext10 = Button(self.axnext10, 'Next10')
-        self.bnext10.on_clicked(self.next10)
-        self.bnext100 = Button(self.axnext100, 'Next100')
-        self.bnext100.on_clicked(self.next100)
-        self.bnext1000 = Button(self.axnext1000, 'Next1000')
-        self.bnext1000.on_clicked(self.next1000)
-
-    def update_data(self):
-        _i = self.ind % self.n_spectra
-        for ll in range(len(self.l)):
-            yl = self.s[_i][:, ll]
-            self.l[ll].set_ydata(yl)
-        self.axr.relim()
-        self.axr.autoscale_view(None, False, self.y_autoscale)
-        self.axr.set_title(f'{self.title[_i]}; N°{_i}')
-        self.figr.canvas.draw()
-        self.figr.canvas.flush_events()
-
-    def next1(self, event):
-        self.ind += 1
-        self.update_data()
-
-    def next10(self, event):
-        self.ind += 10
-        self.update_data()
-
-    def next100(self, event):
-        self.ind += 100
-        self.update_data()
-
-    def next1000(self, event):
-        self.ind += 1000
-        self.update_data()
-
-    def prev1(self, event):
-        self.ind -= 1
-        self.update_data()
-
-    def prev10(self, event):
-        self.ind -= 10
-        self.update_data()
-
-    def prev100(self, event):
-        self.ind -= 100
-        self.update_data()
-
-    def prev1000(self, event):
-        self.ind -= 1000
-        self.update_data()
-
-
-# %%
 
 class fitonclick(object):
     '''This class is used to interactively draw pseudo-voigt (or other type)
@@ -851,13 +570,13 @@ class fitonclick(object):
     pic['h'] = []  # List that will contain heights of each peak
     pic['x0'] = []  # List that will contain central positions of each peak
     pic['w'] = []  # List containing widths
-    pic['GL'] = []
+    pic['GL'] = [] # List containing the Gauss / Lorentz ratios
     # List of cumulated graphs
     # (used later for updating while removing previous one)
     sum_peak = []
     peak_counter: int = 0  # number of peaks on the graph
     cum_graph_present: int = 0  # only 0 or 1
-    scroll_count = 0  # counter to store the cumulative values of scrolling
+    scroll_count = 0.  # counter to store the cumulative values of scrolling
     artists = []  # will be used to store the elipses on tops of the peaks
 
     block = True
@@ -879,21 +598,22 @@ class fitonclick(object):
                      linestyle='none', marker='o', c='k', ms=4, alpha=0.5)
         self.ax.set_title('Left-click to add/remove peaks,'
                           'Scroll to adjust width, \nRight-click to draw sum,'
-                          ' Double-Right-Click when done')
-        self.x_size = self.set_size(self.x)
-        self.y_size = 2*self.set_size(self.y)
-        self.cid = self.fig.canvas.mpl_connect('button_press_event', self.onclick)
+                          ' Press "Enter" when done')
+        self.x_size = set_size(self.x)
+        self.y_size = 2 * set_size(self.y)
+        self.cid = self.fig.canvas.mpl_connect('button_press_event',
+                                               self.onclick)
         self.cid2 = self.fig.canvas.mpl_connect('scroll_event', self.onclick)
+        self.cid3 = self.fig.canvas.mpl_connect("key_press_event", self.end_i)
+        plt.show()
 
-    def set_size(self, variable, rapport=70):
-        return (variable.max() - variable.min())/rapport
 
     def _add_peak(self, event):
         self.peak_counter += 1
         h = event.ydata
         x0 = event.xdata
-        yy = pV(x=self.x, h=h,
-                x0=x0, w=self.x_size*self.initial_width, factor=self.GL)
+        yy = pV(x=self.x, h=h, x0=x0,
+                w=self.x_size*self.initial_width, factor=self.GL)
         one_elipsis = self.ax.add_artist(
                         Ellipse((x0, h),
                                 self.x_size, self.y_size, alpha=0.5,
@@ -901,7 +621,7 @@ class fitonclick(object):
         self.artists.append(one_elipsis)
         self.pic['line'].append(self.ax.plot(self.x, yy,
                                 alpha=0.75, lw=2.5))
-        self.pic['line'][-1][0].set_pickradius(5)
+        self.pic['line'][-1][0].set_pickradius(5) # Is this necessary? (picker shoud work only on artists?)
         # ax.set_ylim(auto=True)
         self.pic['h'].append(h)
         self.pic['x0'].append(x0)
@@ -910,9 +630,10 @@ class fitonclick(object):
 #        return(self.artists, self.pic)
 
     def _adjust_peak_width(self, event, peak_identifier=-1):
+        """Adjust the peak width by scrolling the mouse."""
+
         self.scroll_count += self.x_size * np.sign(event.step) *\
                              self.scrolling_speed/10
-
         if self.scroll_count > -self.x_size*self.initial_width*0.999:
             w2 = self.x_size*self.initial_width + self.scroll_count
         else:
@@ -933,8 +654,8 @@ class fitonclick(object):
 #        return(scroll_count, pic)
 
     def _remove_peak(self, clicked_indice):
-        self.artists[clicked_indice].remove()
-        self.artists.pop(clicked_indice)
+        self.artists[clicked_indice].remove()  # remove as mpl artist
+        self.artists.pop(clicked_indice)  # remove from the list
         self.ax.lines.remove(self.pic['line'][clicked_indice][0])
         self.pic['line'].pop(clicked_indice)
         self.pic['x0'].pop(clicked_indice)
@@ -970,9 +691,8 @@ class fitonclick(object):
         # Check if there is already a cumulated graph plotted:
         if self.cum_graph_present == 1:
             # Check if the sum of present peaks correponds to the cumulated graph
-            if np.array_equal(self.sum_peak[-1][0].get_ydata(), sumy):
-                pass
-            else:  # if not, remove the last cumulated graph from the figure:
+            if not np.array_equal(self.sum_peak[-1][0].get_ydata(), sumy):
+                # if not, remove the last cumulated graph from the figure:
                 _remove_sum(self)
                 # and then plot the new cumulated graph:
                 _add_sum(self, sumy=sumy)
@@ -1003,23 +723,88 @@ class fitonclick(object):
                     self._adjust_peak_width(event, peak_identifier=-1)
                     # -1 means that scrolling will only affect the last plotted peak
 
-            elif event.button !=1 and not event.step:
+            elif event.button != 1 and not event.step:
                 # On some computers middle and right click have both the value 3
                 self._draw_peak_sum()
 
                 if event.dblclick:
                     print('kraj')
                     # Double Middle (or Right?) click ends the show
-                    assert len(self.pic['line']) == self.peak_counter
-                    assert self.cum_graph_present == len(self.sum_peak)
+                    # assert len(self.pic['line']) == self.peak_counter
+                    # assert self.cum_graph_present == len(self.sum_peak)
+                    self.pic['GL'] = [self.GL] * self.peak_counter
                     self.fig.canvas.mpl_disconnect(self.cid)
                     self.fig.canvas.mpl_disconnect(self.cid2)
-                    self.pic['GL'] = [self.GL] * self.peak_counter
+                    self.fig.canvas.mpl_disconnect(self.cid3)
                     self.block = False
-# %%
-# Williams' functions for Raman spectra:
+
+    def end_i(self, event):
+        if event.key == "enter":
+            self.pic['GL'] = [self.GL] * self.peak_counter
+            self.fig.canvas.mpl_disconnect(self.cid)
+            self.fig.canvas.mpl_disconnect(self.cid2)
+            self.fig.canvas.mpl_disconnect(self.cid3)
+            self.block = False
+
+
+def set_bounds(initial_params,
+               A=(0.5, 1.4, "multiply"),
+               x=(-20, 20, "add"),
+               w=(0.5, 16, "multiply"),
+               gl=(0, 1, "absolute")):
+    """Define the bounds based on the initial parameters.
+
+    Parameters:
+    -----------
+    initial_params: list of lists or a 2D numpy array
+        ! Warning: the order is important
+        for the pseudo-voigt as defined in utilities.py `pV` function it is:
+        [[A_1, x_1, w_1, gl_1],
+         [A_2, x_2, ....],
+         ...
+         [A_N, x_N, w_N, gl_N]]
+        where N is the number of peaks, and for each peak:
+            A: amplitude
+            x: position
+            w: width (at mid-height)
+            gl: gaussian to lorentzian ratio (from 0 to 1)
+    A, x, w, gl: tuples of form (lower: float, upper: float, method: str)
+        Bounds relative to the initial_params.
+        method can be one of ["multiply", "add", "absolute"]
+        "multiply": the bounds for the given parameter are in the range
+                    (param * lower, param * upper)
+        "add":      the bounds for the given parameter are in the range
+                    (param - lower, param + upper)
+        "absolute": the bounds for the given parameter are in the range
+                    (lower, upper)
+
+    Returns:
+    --------
+    bounds: tuple of type (lower_bounds, upper_bounds)
+        where lower_bounds and upper_bounds are 1D numpy arrays of lengths
+        equal to N * n_params.
+            N: number of peaks
+            n_params: number of parameters needed to define one peak
+        """
+    # set the initial bounds as infinities:
+    upper_bounds = np.ones_like(initial_params)*np.inf
+    lower_bounds = np.ones_like(initial_params)*(-np.inf)
+    for i, p in enumerate([A, x, w, gl]):
+        if p[-1] == "multiply":
+            func = np.multiply
+        elif p[-1] == "add":
+            func = np.add
+        else:
+            def func(mp, p):
+                return p
+        lower_bounds[:, i] = np.asarray([func(mp[i], p[0]) for mp in initial_params])
+        upper_bounds[:, i] = np.asarray([func(mp[i], p[1]) for mp in initial_params])
+
+    return (lower_bounds.ravel(), upper_bounds.ravel())
+
+
 def long_correction(sigma, lambda_laser, T=30, T0=0):
-    """
+    """Williams' functions for Raman spectra:
     Function computing the Long correction factor according to Long
     1977. This function can operate on numpy.ndarrays as well as on
     simple numbers.
@@ -1047,41 +832,13 @@ def long_correction(sigma, lambda_laser, T=30, T0=0):
     lambda_inc = lambda_laser * 1e-7      # cm
     sigma_inc = 1. / lambda_inc           # cm-1
     h = 6.63e-34                          # J.s
-    TK = 273.0 + T                        # K
-    T0K = 273.0 + T0                      # K
+    T_K = 273.0 + T                        # K
+    T0_K = 273.0 + T0                      # K
     kB = 1.38e-23                         # J/K
     ss = sigma_inc / sigma
     cc = h*c/kB
-    return (ss**3 / (ss - 1)**4
-            * (1 - np.exp(cc*sigma*(1/TK-1/T0K))))
-
-# %%
-def clean(sigma, raw_spectra, mode='area'):
-    """
-    Cleans the spectra by removing the baseline offset,
-    and make them comparable
-    by normalizing them according to their area or their maximum.
-
-    Parameters
-    ----------
-    sigma : numpy.ndarray
-        Wavenumber in cm-1
-    raw_spectra : numpy.ndarray, n_spectra * n_features
-        Input spectra
-    mode : {'area', 'max'}
-        Controls how spectra are normalized
-    """
-    clean_spectra = np.copy(raw_spectra)
-    # Remove the offset
-    clean_spectra -= clean_spectra.min(axis=1)[:, np.newaxis]
-    # Normalize the spectra
-    if mode == 'max':
-        clean_spectra /= clean_spectra.max(axis=1)[:, np.newaxis]
-    elif mode == 'area':
-        clean_spectra /= np.abs(np.trapz(clean_spectra, x=sigma))[:, np.newaxis]
-    else:
-        print('Normalization mode not understood; No normalization applied')
-    return clean_spectra
+    return (ss ** 3 / (ss - 1) ** 4
+            * (1 - np.exp(cc * sigma * (1/T_K - 1/T0_K))))
 
 
 def rolling_window(trt, window_size, ax=0):
