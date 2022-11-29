@@ -20,10 +20,9 @@ This procedure allows you to manually determine reasonable initial parameters to
 2. Repeat the procedure as many times as needed to account for all the peaks you beleive are present.
 - Right-clicking any time will draw the sum of all the present profiles you added up to that moment.
 - Left clicking on the top of existing peak erases it.
+3. Press "Enter" or right doubleclick to end 
 
 
-
-### Now we plot the data, and then interactively (oh yes!) assign the initial values to the fitting procedure.
 <div class="alert alert-block alert-warning">
 <details>
     <summary>Attention!</summary>
@@ -31,7 +30,7 @@ This procedure allows you to manually determine reasonable initial parameters to
 </details>
 </div>
 
-![](pics/SMfit_in_action.gif)
+![in action](pics/SMfit_in_action.gif)
 
 ### Afther this step, the script should optimize the initial parameters you thus provided
 nothing else to do, but admire the view(s)
