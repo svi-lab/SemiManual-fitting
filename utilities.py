@@ -13,10 +13,10 @@ import matplotlib as mpl
 from matplotlib import pyplot as plt
 from matplotlib.widgets import Slider, Button, RadioButtons
 from matplotlib.patches import Ellipse
-from cycler import cycler
-import scipy
+# from cycler import cycler
+# import scipy
 from scipy import sparse
-from scipy.ndimage import median_filter
+# from scipy.ndimage import median_filter
 from scipy.optimize import minimize_scalar
 from skimage import io, transform
 
@@ -551,7 +551,7 @@ class fitonclick(object):
             whatever you want to pass to plt.subplots(**kwargs)
     Returns:
         Nothing, but you can access the atributes using class instance, like
-        fitonclick.pic: dictionnary containing the parameters of each peak added
+        fitonclick.pic: a dict containing the parameters of each peak added
         fitonclick.sum_peak: list containing cumulated graph line
             to get the y-values, use sum_peak[-1][0].get_ydata()
         fitonclick.peak_counter: int giving the number of peaks present
@@ -564,23 +564,7 @@ class fitonclick(object):
 
 
     '''
-    # Initiating variables to which we will atribute peak caractéristics:
-    pic = {}
-    pic['line'] = []  # List containing matplotlib.Line2D object for each peak
-    pic['h'] = []  # List that will contain heights of each peak
-    pic['x0'] = []  # List that will contain central positions of each peak
-    pic['w'] = []  # List containing widths
-    pic['GL'] = [] # List containing the Gauss / Lorentz ratios
-    # List of cumulated graphs
-    # (used later for updating while removing previous one)
-    sum_peak = []
-    peak_counter: int = 0  # number of peaks on the graph
-    cum_graph_present: int = 0  # only 0 or 1
-    scroll_count = 0.  # counter to store the cumulative values of scrolling
-    artists = []  # will be used to store the elipses on tops of the peaks
-
-    block = True
-
+    
     def __init__(self, x, y,
                  initial_GaussToLoretnz_ratio=0.5,
                  scrolling_speed=1,
@@ -592,11 +576,28 @@ class fitonclick(object):
         self.GL = initial_GaussToLoretnz_ratio
         self.scrolling_speed = scrolling_speed
         self.initial_width = initial_width
+        self.manualfit_spectra = None
+        # Initiating variables to which we will atribute peak caractéristics:
+        self.pic = {}
+        self.pic['line'] = []  # List containing matplotlib.Line2D object for each peak
+        self.pic['h'] = []  # List that will contain heights of each peak
+        self.pic['x0'] = []  # List that will contain central positions of each peak
+        self.pic['w'] = []  # List containing widths
+        self.pic['GL'] = []  # List containing the Gauss / Lorentz ratios
+        # List of cumulated graphs
+        # (used later for updating while removing previous one)
+        self.sum_peak = []
+        self.peak_counter: int = 0  # number of peaks on the graph
+        self.cum_graph_present: int = 0  # only 0 or 1
+        self.scroll_count = 0.  # counter to store the cumulative values of scrolling
+        self.artists = []  # will be used to store the elipses on tops of the peaks
+        self.block = True
+
         # Setting up the plot:
         self.fig, self.ax = plt.subplots(**kwargs)
         self.ax.plot(self.x, self.y,
                      linestyle='none', marker='o', c='k', ms=4, alpha=0.5)
-        self.ax.set_title('Left-click to add/remove peaks,'
+        self.ax.set_title('Left-click to add/remove peaks; '
                           'Scroll to adjust width, \nRight-click to draw sum,'
                           ' Press "Enter" when done')
         self.x_size = set_size(self.x)
@@ -606,7 +607,6 @@ class fitonclick(object):
         self.cid2 = self.fig.canvas.mpl_connect('scroll_event', self.onclick)
         self.cid3 = self.fig.canvas.mpl_connect("key_press_event", self.end_i)
         plt.show()
-
 
     def _add_peak(self, event):
         self.peak_counter += 1
@@ -621,7 +621,8 @@ class fitonclick(object):
         self.artists.append(one_elipsis)
         self.pic['line'].append(self.ax.plot(self.x, yy,
                                 alpha=0.75, lw=2.5))
-        self.pic['line'][-1][0].set_pickradius(5) # Is this necessary? (picker shoud work only on artists?)
+        self.pic['line'][-1][0].set_pickradius(5)
+        # Is the above line necessary? (picker shoud work only on artists?)
         # ax.set_ylim(auto=True)
         self.pic['h'].append(h)
         self.pic['x0'].append(x0)
@@ -685,21 +686,23 @@ class fitonclick(object):
 #            return sum_peak
 
         # Sum all the y values from all the peaks:
-        sumy = np.sum(np.asarray(
-                [self.pic['line'][i][0].get_ydata() for i in range(self.peak_counter)]),
-                axis=0)
+        self.manualfit_spectra = np.sum(np.asarray(
+                                          [self.pic['line'][i][0].get_ydata()
+                                           for i in range(self.peak_counter)]),
+                                        axis=0)
         # Check if there is already a cumulated graph plotted:
         if self.cum_graph_present == 1:
             # Check if the sum of present peaks correponds to the cumulated graph
-            if not np.array_equal(self.sum_peak[-1][0].get_ydata(), sumy):
+            if not np.array_equal(self.sum_peak[-1][0].get_ydata(),
+                                  self.manualfit_spectra):
                 # if not, remove the last cumulated graph from the figure:
                 _remove_sum(self)
                 # and then plot the new cumulated graph:
-                _add_sum(self, sumy=sumy)
+                _add_sum(self, sumy=self.manualfit_spectra)
         # No cumulated graph present:
         elif self.cum_graph_present == 0:
             # plot the new cumulated graph
-            _add_sum(self, sumy=sumy)
+            _add_sum(self, sumy=self.manualfit_spectra)
 
         else:
             raise("WTF?")
@@ -710,37 +713,47 @@ class fitonclick(object):
         if event.inaxes == self.ax:  # if you click inside the plot
             if event.button == 1:  # left click
                 # Create list of all elipes and check if the click was inside:
-                click_in_artist = [art.contains(event)[0] for art in self.artists]
+                click_in_artist = [art.contains(event)[0]
+                                   for art in self.artists]
                 if any(click_in_artist):  # if click was on any of the elipsis
-                    clicked_indice = click_in_artist.index(True) # identify the one
+                    # identify the one we clicked
+                    clicked_indice = click_in_artist.index(True)
                     self._remove_peak(clicked_indice=clicked_indice)
-
                 else:  # if click was not on any of the already drawn elipsis
                     self._add_peak(event)
-
-            elif event.step:
-                if self.peak_counter:
+            elif event.step:  # if it's a mouse scroll event
+                if self.peak_counter:  # if there are any peaks
                     self._adjust_peak_width(event, peak_identifier=-1)
-                    # -1 means that scrolling will only affect the last plotted peak
+                    # peak_identifier = -1 means that scrolling will
+                    # only affect the last plotted peak
 
             elif event.button != 1 and not event.step:
-                # On some computers middle and right click have both the value 3
+                # So, basically, right or middle click both draw the sum:
                 self._draw_peak_sum()
 
-                if event.dblclick:
-                    print('kraj')
+                if event.dblclick:  # double, not left, click
+                    # ATTENTION:
+                    # doubleclick seems not to work with certain backends (?)
                     # Double Middle (or Right?) click ends the show
-                    # assert len(self.pic['line']) == self.peak_counter
-                    # assert self.cum_graph_present == len(self.sum_peak)
-                    self.pic['GL'] = [self.GL] * self.peak_counter
-                    self.fig.canvas.mpl_disconnect(self.cid)
-                    self.fig.canvas.mpl_disconnect(self.cid2)
-                    self.fig.canvas.mpl_disconnect(self.cid3)
-                    self.block = False
+                    event.key = "enter"
+                    self.end_i(event)
 
     def end_i(self, event):
         if event.key == "enter":
             self.pic['GL'] = [self.GL] * self.peak_counter
+            self.manualfit_params = np.array(list(self.pic['h']) +
+                                             list(self.pic['x0']) +
+                                             list(self.pic['w']) +
+                                             list(self.pic['GL'])
+                                             )
+            self.manualfit_params = self.manualfit_params.reshape(-1,
+                                                                  self.peak_counter).T
+            self.manualfit_params = self.manualfit_params.ravel()
+            if self.manualfit_spectra is None:  # even if not drawn
+                self.manualfit_spectra = np.sum(np.asarray(
+                                          [self.pic['line'][i][0].get_ydata()
+                                           for i in range(self.peak_counter)]),
+                                        axis=0)
             self.fig.canvas.mpl_disconnect(self.cid)
             self.fig.canvas.mpl_disconnect(self.cid2)
             self.fig.canvas.mpl_disconnect(self.cid3)
