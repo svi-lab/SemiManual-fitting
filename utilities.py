@@ -11,12 +11,9 @@ from joblib import Parallel, delayed
 from warnings import warn
 import matplotlib as mpl
 from matplotlib import pyplot as plt
-from matplotlib.widgets import Slider, Button, RadioButtons
+from matplotlib.widgets import Slider
 from matplotlib.patches import Ellipse
-# from cycler import cycler
-# import scipy
 from scipy import sparse
-# from scipy.ndimage import median_filter
 from scipy.optimize import minimize_scalar
 from skimage import io, transform
 
@@ -90,25 +87,29 @@ def baseline_als(y, lam=1e5, p=5e-5, niter=12):
     if the rolling ball which comes from beneath the spectrum and thus sets
     the baseline.
 
-    Then, to follow the image, schematic explanaton of the params would be:
+    Then, further following the image, schematic explanaton of the params would be:
 
     Params:
     ----------
-        y:          1D or 2D ndarray: the spectra on which to find the baseline
+        y: 1D or 2D ndarray of floats
+            the spectra on which to find the baseline
 
-        lam:number: Can be viewed as the radius of the ball.
-                    As a rule of thumb, this value should be around the
-                    twice the width of the broadest feature you want to keep
-                    (width is to be measured in number of points, since
-                    for the moment no x values are taken into accound
-                    in this algorithm)
+        lam: float
+            Can be viewed as the radius of the ball.
+            As a rule of thumb, this value should be something like
+            ten times the width of the broadest feature you want to keep
+            (width is to be measured in number of points, since
+            for the moment no x values are taken into account
+            in this algorithm)
 
-        p:number:   Can be viewed as the measure of how much the ball
-                    can penetrate into the spectra from below
+        p: float
+            Can be viewed as the measure of how much the ball
+            can penetrate into the spectra from below
 
-        niter:int:  number of iterations
-                   (the resulting baseline should stabilize after
-                    some number of iterations)
+        niter: int
+            number of iterations
+           (the resulting baseline should stabilize after
+            some number of iterations)
 
     Returns:
     -----------
@@ -426,7 +427,8 @@ class AllMaps(object):
             sigma values with a slider, or using left/right keyboard arrows)
     '''
 
-    def __init__(self, map_spectra, sigma=None, components=None, components_sigma=None, **kwargs):
+    def __init__(self, map_spectra, sigma=None, components=None,
+                 components_sigma=None, **kwargs):
         self.map_spectra = map_spectra
         if sigma is None:
             self.sigma = np.arange(map_spectra.shape[-1])
@@ -445,34 +447,39 @@ class AllMaps(object):
         else:
             self.components = None
         if components is not None:
-            self.fig, (self.ax2, self.ax, self.cbax) = plt.subplots(ncols=3, gridspec_kw={'width_ratios':[40,40,1]})
-            self.cbax.set_box_aspect(40*self.map_spectra.shape[0]/self.map_spectra.shape[1])
+            self.fig, (self.ax2, self.ax, self.cbax) =\
+                plt.subplots(ncols=3, gridspec_kw={'width_ratios': [40, 40, 1]})
+            self.cbax.set_box_aspect(40 * self.map_spectra.shape[0] /
+                                     self.map_spectra.shape[1])
         else:
-            self.fig, (self.ax, self.cbax) = plt.subplots(ncols=2, gridspec_kw={'width_ratios':[40,1]})
-            self.cbax.set_box_aspect(40*self.map_spectra.shape[0]/self.map_spectra.shape[1])
+            self.fig, (self.ax, self.cbax) =\
+                plt.subplots(ncols=2, gridspec_kw={'width_ratios': [40, 1]})
+            self.cbax.set_box_aspect(40 * self.map_spectra.shape[0] /
+                                     self.map_spectra.shape[1])
             #self.cbax = self.fig.add_axes([0.92, 0.3, 0.03, 0.48])
         # Create some space for the slider:
         self.fig.subplots_adjust(bottom=0.19, right=0.89)
         self.title = kwargs.get('title', None)
 
-        self.im = self.ax.imshow(self.map_spectra[:,:,0])
-        self.im.set_clim(np.percentile(self.map_spectra[:,:,0], [1,99]))
+        self.im = self.ax.imshow(self.map_spectra[:, :, 0])
+        self.im.set_clim(np.percentile(self.map_spectra[:, :, 0], [1, 99]))
         if self.components is not None:
             self.line, = self.ax2.plot(self.components_sigma, self.components[0])
-            self.ax2.set_box_aspect(self.map_spectra.shape[0]/self.map_spectra.shape[1])
+            self.ax2.set_box_aspect(self.map_spectra.shape[0] /
+                                    self.map_spectra.shape[1])
             self.ax2.set_title(f"Component {0}")
         self.titled(0)
         self.axcolor = 'lightgoldenrodyellow'
-        self.axframe = self.fig.add_axes([0.15, 0.1, 0.7, 0.03], facecolor=self.axcolor)
-
+        self.axframe = self.fig.add_axes([0.15, 0.1, 0.7, 0.03],
+                                         facecolor=self.axcolor)
 
         self.sframe = Slider(self.axframe, 'Frame',
                              self.first_frame, self.last_frame,
                              valinit=self.first_frame, valfmt='%d', valstep=1)
 
         self.my_cbar = mpl.colorbar.colorbar_factory(self.cbax, self.im)
-
-        self.sframe.on_changed(self.update)  # calls the "update" function when changing the slider position
+        # calls the "update" function when changing the slider position:
+        self.sframe.on_changed(self.update)
         # Calling the "press" function on keypress event
         # (only arrow keys left and right work)
         self.fig.canvas.mpl_connect('key_press_event', self.press)
@@ -562,9 +569,8 @@ class fitonclick(object):
         >>>while my_class_instance.block:
         >>>    plt.waitforbuttonpress(timeout=-1)
 
-
     '''
-    
+
     def __init__(self, x, y,
                  initial_GaussToLoretnz_ratio=0.5,
                  scrolling_speed=1,

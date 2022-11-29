@@ -9,7 +9,7 @@ The tool whose aim is to facilitate the fitting of the (experimental) curve with
     to remove the baseline first. You'll find this function in `utilities.py`.
     All you need to do is something like:
     <pre>y -= ut.baseline_als(y)</pre>
-    (After you have loaded your data) to create a new, baseline substracted, y.
+    (after you have loaded your data) - to create a new, baseline substracted, y.
     </details>
 </div>
 This procedure allows you to manually determine reasonable initial parameters to pass on to scipy optimize module.
