@@ -16,12 +16,13 @@
 # In[1]:
 import numpy as np
 import matplotlib.pyplot as plt
-from copy import copy
 from scipy.optimize import curve_fit
-from utilities import fitonclick, pV
-from utilities import multi_pV as fitting_function
+import utilities as ut
+
+fitting_function = ut.multi_pV
 plt.style.use('bmh')
 
+# del mfit
 figsize = (12, 10)
 # In[2]:
 # Creating some data...
@@ -33,80 +34,51 @@ dummy_params = [51, 200, 85, 0.3,
                 10, 272, 37, 0.8,
                 2.7, 317, 39, 0.52,
                 3.9, 471, 62, 0.25]
+# A, X, w, GL
+x = np.arange(0, 584, 1.34)
+y = fitting_function(x, *dummy_params)
+# Add some noise to the data:.
+y += np.random.random(len(x))*np.mean(y)/5
 
-dummy_x = np.arange(0, 584, 1.34)
-dummy_y = fitting_function(dummy_x, *dummy_params)
-dummy_y += np.random.random(len(dummy_x))*np.mean(dummy_y)/5
-
-
-x = dummy_x
-y = dummy_y
 
 # In[3]:
 # check the docstring for the fitonclick class:
-mfit = fitonclick(x, y, scrolling_speed=4, figsize=figsize)
+mfit = ut.fitonclick(x, y, scrolling_speed=4, figsize=figsize)
 # Important:
 while mfit.block:
     plt.waitforbuttonpress(timeout=-1)
 plt.close()  # You can also leave the plot on if you want
 # In[7]:
 x_size = mfit.x_size
-
 peaks_present: int = mfit.peak_counter
-
 pic = mfit.pic
 # creating the list of initial parameters from your manual input:
 # (as a list of lists)
-manualfit_components_params = copy(list(map(list, zip(
-                            pic['h'], pic['x0'], pic['w'], pic['GL']))))
-# # to transform the list of lists into one single list:
-# manualfit_components_params = list(chain(*manualfit_components_params))
+mf_params = mfit.manualfit_params
+
 
 # the sum of manually created peaks:
-assert len(mfit.sum_peak) > 0, 'No peaks initiated'
-manualfit = mfit.sum_peak[0][0].get_ydata()
+manualfit = mfit.manualfit_spectra
+# if len(mfit.sum_peak) == 1:
+#     manualfit = mfit.sum_peak[0][0].get_ydata()
+# else:
+#     manualfit = fitting_function(x, *mf_params)
 
 # In[7]:
 # Setting the bounds based on your input
 # (you can play with this part if you feel like it,
 # but leaving it as it is should be ok for basic usage)
-
-# set the initial bounds as infinities:
-upper_bounds = np.ones_like(manualfit_components_params)*np.inf
-lower_bounds = np.ones_like(manualfit_components_params)*(-np.inf)
-
-# setting reasonable bounds for the peak amplitude
-# as a portion to your initial manual estimate
-upper_bounds[:, 0] = np.asarray([A[0]*1.4 for A in manualfit_components_params])
-lower_bounds[:, 0] = np.asarray([A[0]*0.7 for A in manualfit_components_params])
-
-# setting reasonable bounds for the peak position
-# as a shift in regard to your initial manual position
-upper_bounds[:, 1] = \
-    np.asarray([A[1] + 2*x_size for A in manualfit_components_params])
-lower_bounds[:, 1] = \
-    np.asarray([A[1] - 2*x_size for A in manualfit_components_params])
-
-# setting the bounds for the widths
-upper_bounds[:, 2] = \
-    np.asarray([A[2]*16 for A in manualfit_components_params])
-lower_bounds[:, 2] = \
-    np.asarray([A[2]*0.5 for A in manualfit_components_params])
-
-
-# setting the bounds for the lorentz/gauss ratio
-upper_bounds[:, 3] = 1
-lower_bounds[:, 3] = 0
-
-
-bounds = (lower_bounds.ravel(), upper_bounds.ravel())
+bounds = ut.set_bounds(mf_params.reshape(-1, 4),
+                       A=(0.5, 1.4, "multiply"),
+                       x=(-2*x_size, 2*x_size, "add"),
+                       w=(0.5, 16, "multiply"),
+                       gl=(0, 1, "absolute"))
 
 
 # In[7]:
-mfcp = np.asarray(manualfit_components_params).ravel()
 # The curve-fitting part:
 fitted_params, b = curve_fit(fitting_function, x, y, method='trf',
-                             p0=mfcp,
+                             p0=mf_params,
                              absolute_sigma=False, bounds=bounds)
 #%%
 fitting_err = np.sqrt(np.diag(b))
@@ -154,19 +126,29 @@ for i in range(peaks_present):
     fit_res = list(zip(par_nam, fitted_params[i*4:i*4+4],
                        fitting_err[i*4:i*4+4]))
     label = [f"{P}={v:.2f}\U000000B1{e:.1f}" for P, v, e in fit_res]
-    yy_i = pV(x, *fitted_params[i*4:i*4+4])
+    yy_i = ut.pV(x, *fitted_params[i*4:i*4+4])
     peak_i, = pax.plot(x, yy_i, alpha=0.5, label=label)
     pax.fill_between(x, yy_i, facecolor=peak_i.get_color(), alpha=0.3)
 pax.legend()
 pax.set_title('Showing the individual peaks as found by fitting procedure')
 
 pfig.show()
-parametar_names = ['Height', 'Center', 'FWMH', 'Ratio Gauss/Lorenz']
-print(f"{'Your initial guess':>47s}{'After fitting':>19s}\n")
+# %%
+# print the parameters as found by the fitting procedure:
+parametar_names = ['Height', 'Center', 'FWMH', 'Gauss/Lorenz']
+if len(dummy_params) == len(fitted_params):
+    rpm = "Real params"
+    real_parameter_values = [f"   ::   {dp:6.1f}" for dp in dummy_params]
+else:
+    rpm = ""
+    real_parameter_values = [""]*peaks_present*4
+print(f"{'Your initial guess':>30s}{'After fitting':>26s}{rpm:>16s}\n")
 for i in range(len(fitted_params)):
-    print(f"Peak {i//4}|   {parametar_names[i%4]:<20s}: "
-          f" {mfcp[i]:8.2f}     ->    "
-          f" {fitted_params[i]:6.2f} \U000000B1 {fitting_err[i]:4.2f}")
+    print(f"Peak {i//4}|   {parametar_names[i%4]:<13s}: "
+          f" {mf_params[i]:8.2f}   ->   "
+          f" {fitted_params[i]:6.2f} \U000000B1 {fitting_err[i]:4.2f}"
+          f"{real_parameter_values[i]}")
 # %%
 # Deleting the class instance, in case you want to start over
 del mfit
+del mf_params
