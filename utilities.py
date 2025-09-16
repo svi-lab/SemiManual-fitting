@@ -7,7 +7,9 @@ Created on Tue Jun 11 15:28:47 2019
 @author: dejan
 """
 import numpy as np
+from scipy.optimize import curve_fit
 from joblib import Parallel, delayed
+import functools
 from warnings import warn
 import matplotlib as mpl
 from matplotlib import pyplot as plt
@@ -16,6 +18,7 @@ from matplotlib.patches import Ellipse
 from scipy import sparse
 from scipy.optimize import minimize_scalar
 from skimage import io, transform
+import xarray as xr
 
 
 def find_barycentre(x, y, method="trapz_minimize"):
@@ -271,7 +274,11 @@ def multi_pV(x, *params, peak_function=pV):
     -----------------
     x : np.ndarray
         1D ndarray - independent variable.
-    *params : list[list[float]]
+    *params : 1D np.ndarray of length euqal to a multiple of 4
+        4 params for the first peak, followed by the four params
+        for the second peak etc.
+
+        The following no longer applies:
         The list of lists containing the peak parameters. For each infividual
         peak to be created there should be a sublist of parameters to be
         passed to the pV function. So that `params` list finally contains
@@ -292,7 +299,8 @@ def multi_pV(x, *params, peak_function=pV):
     >>> mpar = [[40, 220, 100], [122, 440, 80], [164, 550, 160], [40, 480, 340]]
     >>> plt.plot(x, multi_pV(x, *mpar))
     '''
-    result = np.zeros_like(x, dtype=np.float)
+    result = np.zeros_like(x, dtype=float)
+    params = np.array(params).flatten()
     n_peaks = int((len(params)+0.1)/4)  # Number of peaks
     ipp = np.asarray(params).reshape(n_peaks, 4)
     for pp in ipp:
@@ -554,6 +562,16 @@ class fitonclick(object):
             defines how quickly your scroling widens peaks
         initial_width: float>0, default=5
             defines initial width of peaks
+        bounds: you should provide the bounds for all the parameters.
+            If you do not provide any, some senisble defaults will be used.
+            See more details in «set_bounds» function's docstring.
+        fitting_function: function
+            By default it is the «pV» function from the simulate module.
+            For the moment, it is the only one available.
+        initial_fit_on: function
+            The function to use to select a representative spectrum on which
+            to estimate the initial paramaters for the fit.
+            Applies only if your input array contains a series of measurements.
         **kwargs: dictionary, for exemple {'figsize':(9,9)}
             whatever you want to pass to plt.subplots(**kwargs)
     Returns:
@@ -571,18 +589,39 @@ class fitonclick(object):
 
     '''
 
-    def __init__(self, x, y,
+    def __init__(self, y,
+                 x=None,
                  initial_GaussToLoretnz_ratio=0.5,
                  scrolling_speed=1,
                  initial_width=5,
+                 bounds=None,
+                 fitting_function=multi_pV,
+                 initial_fit_on=np.median,
+                 plot_results=True,
                  **kwargs):
         plt.ioff()
-        self.x = x
-        self.y = y
+        if isinstance(y, xr.DataArray):
+            if x is None:
+                x = y.shifts.data
+            y = y.values
+        if y.ndim == 2:
+            self.ally = y
+            self.y = initial_fit_on(y, axis=0)
+        elif y.ndim == 1:
+            self.ally = None
+            self.y = y
+        else:
+            warn("Flatten your input array first!")
+        if x is not None:
+            self.x = x
+        else:
+            self.x - np.arange(self.y)
         self.GL = initial_GaussToLoretnz_ratio
         self.scrolling_speed = scrolling_speed
         self.initial_width = initial_width
+        self.fitting_function = fitting_function
         self.manualfit_spectra = None
+        self.manualfit_params = None
         # Initiating variables to which we will atribute peak caractéristics:
         self.pic = {}
         self.pic['line'] = []  # List containing matplotlib.Line2D object for each peak
@@ -613,6 +652,61 @@ class fitonclick(object):
         self.cid2 = self.fig.canvas.mpl_connect('scroll_event', self.onclick)
         self.cid3 = self.fig.canvas.mpl_connect("key_press_event", self.end_i)
         plt.show()
+
+        while self.block:
+            plt.waitforbuttonpress(timeout=-1)
+        
+        # Set the bounds in the search for the best fitting parameters:
+        if bounds is None:
+            self.bounds = set_bounds(self.manualfit_params.reshape(
+                            self.peak_counter, 4))
+        else:
+            self.bounds = bounds
+        
+        # The actual fitting:
+        self.fitted_params, self.b = curve_fit(self.fitting_function,
+                                               self.x, self.y,
+                                               method="trf",
+                                               p0=self.manualfit_params.flatten(),
+                                               absolute_sigma=False,
+                                               bounds=self.bounds)
+        self.fitting_err = np.sqrt(np.diag(self.b))
+        self.y_fitted = self.fitting_function(self.x, self.fitted_params) 
+
+        if plot_results:
+            # Plotting the individual peaks after fitting
+            pfig, pax = plt.subplots()
+
+            pax.plot(self.x, self.y,
+                    linestyle='none', marker='o', ms=4, c='k', alpha=0.3)
+            pax.plot(self.x, self.y_fitted,
+                    '--k', lw=2, alpha=0.6, label='fit')
+            par_nam = ['h', 'x0', 'w', 'G/L']
+            for i in range(self.peak_counter):
+                fit_res = list(zip(par_nam, self.fitted_params[i*4:i*4+4],
+                                self.fitting_err[i*4:i*4+4]))
+                label = [f"{P}={v:.2f}\U000000B1{e:.1f}" for P, v, e in fit_res]
+                yy_i = pV(self.x, *self.fitted_params[i*4:i*4+4])
+                peak_i, = pax.plot(self.x, yy_i, alpha=0.5, label=label)
+                pax.fill_between(self.x, yy_i,
+                                facecolor=peak_i.get_color(), alpha=0.3)
+            pax.legend()
+            pax.set_title('Showing the individual peaks as found by fitting procedure')
+
+            pfig.show()
+        
+        if self.ally is not None:
+            fpa = []
+            new_bounds = set_bounds(self.fitted_params.reshape(self.peak_counter, 4))
+            for yy in self.ally:
+                # print(self.x.shape, yy.shape, self.fitted_params.shape)
+                fp, bi = curve_fit(self.fitting_function,
+                                   self.x, yy, method='trf',
+                                   p0=self.fitted_params,
+                                   absolute_sigma=False, bounds=new_bounds)
+                print(fp)
+                fpa.append(fp)
+            self.fitted_params_all = np.array(fpa)
 
     def _add_peak(self, event):
         self.peak_counter += 1
@@ -663,7 +757,9 @@ class fitonclick(object):
     def _remove_peak(self, clicked_indice):
         self.artists[clicked_indice].remove()  # remove as mpl artist
         self.artists.pop(clicked_indice)  # remove from the list
-        self.ax.lines.remove(self.pic['line'][clicked_indice][0])
+        # self.ax.lines.remove(self.pic['line'][clicked_indice][0])
+        my_ind = self.ax.lines.index(self.pic['line'][clicked_indice][0])
+        self.ax.lines[my_ind].remove()
         self.pic['line'].pop(clicked_indice)
         self.pic['x0'].pop(clicked_indice)
         self.pic['h'].pop(clicked_indice)
@@ -678,7 +774,8 @@ class fitonclick(object):
 
         def _remove_sum(self):
             assert self.cum_graph_present == 1, "no sum drawn, nothing to remove"
-            self.ax.lines.remove(self.sum_peak[-1][0])
+            my_ind = self.ax.lines.index(self.sum_peak[-1][0])
+            self.ax.lines[my_ind].remove()
             self.sum_peak.pop()
             self.cum_graph_present -= 1
 #            return sum_peak
@@ -689,7 +786,6 @@ class fitonclick(object):
                                               color='lightgreen',
                                               lw=3, alpha=0.6))
             self.cum_graph_present += 1
-#            return sum_peak
 
         # Sum all the y values from all the peaks:
         self.manualfit_spectra = np.sum(np.asarray(
@@ -713,7 +809,6 @@ class fitonclick(object):
         else:
             raise("WTF?")
         self.fig.canvas.draw_idle()
-#        return(cum_graph_present, sum_peak)
 
     def onclick(self, event):
         if event.inaxes == self.ax:  # if you click inside the plot
@@ -754,7 +849,7 @@ class fitonclick(object):
                                              )
             self.manualfit_params = self.manualfit_params.reshape(-1,
                                                                   self.peak_counter).T
-            self.manualfit_params = self.manualfit_params.ravel()
+            # self.manualfit_params = self.manualfit_params.ravel()
             if self.manualfit_spectra is None:  # even if not drawn
                 self.manualfit_spectra = np.sum(np.asarray(
                                           [self.pic['line'][i][0].get_ydata()
@@ -767,9 +862,9 @@ class fitonclick(object):
 
 
 def set_bounds(initial_params,
-               A=(0.5, 1.4, "multiply"),
+               A=(0.5, 2, "multiply"),
                x=(-20, 20, "add"),
-               w=(0.5, 16, "multiply"),
+               w=(0.2, 5, "multiply"),
                gl=(0, 1, "absolute")):
     """Define the bounds based on the initial parameters.
 
@@ -820,8 +915,7 @@ def set_bounds(initial_params,
         upper_bounds[:, i] = np.asarray([func(mp[i], p[1]) for mp in initial_params])
 
     return (lower_bounds.ravel(), upper_bounds.ravel())
-
-
+#%%
 def long_correction(sigma, lambda_laser, T=30, T0=0):
     """Williams' functions for Raman spectra:
     Function computing the Long correction factor according to Long
@@ -900,3 +994,269 @@ def rolling_window(trt, window_size, ax=0):
     strides = (trt.strides[ax],) + trt.strides
     # Return thus created array:
     return np.lib.stride_tricks.as_strided(a, shape=shape, strides=strides, writeable=False)
+
+def style_decorator(style="dark_background"):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            with plt.style.context(style):
+                return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+@style_decorator()
+def draw_aggregated(da, shifts=None, style="dark_background", facecolor="black", note=False,
+                    binning=np.geomspace, shading="auto", units="cm$^{{-1}}$",
+                    cmap="inferno", add=False, dodatak=0, **kwargs):
+    """Draw aggregated spectra.
+    It puts spectra into bins, color intensity reflects the number of spectra
+    present in the given bin.
+
+    Parameters:
+        da: xr.DataArray
+            Your spectra.
+        n_bins: int
+            The number of bins you want to use
+        style:
+            one of matplotlib.pyplot.styles.available
+        facecolor:
+            matplotlib color
+        binning:
+            The function to use for binning (np.geomspace, np.linspace,...)
+        add: bool
+            Weather to add the spectra to an existing figure/axes
+            or to draw new figure
+        norm: 
+            default is `mpl.colors.LogNorm()`, you may wish to switch to
+            `mpl.colors.Normalize()`.
+
+    """
+
+    if isinstance(da, xr.DataArray):
+        spectra = da.values
+        if shifts is None:
+            shifts = da.shifts
+    else:
+        spectra = da
+    assert isinstance(spectra, np.ndarray)
+    
+    def tocm_1(x, pos):
+        """Add units to x_values"""
+        nonlocal n
+        if x < n:
+            xx = f"{shifts[int(x)]:.0f}{units}"
+        else:
+            xx = ""
+        return xx
+
+    def restablish_zero(y, pos):
+        """Restablishes zero values (removed because of log)."""
+        nonlocal bins
+        yind = int(y)
+        if yind < len(bins):
+            yy = f"{bins[int(y)] - 1:.2g}"
+        else:
+            yy = ""
+        return yy
+
+    def forward(x):
+        return np.exp(x)
+
+    def backward(x):
+        return np.log(x)
+
+    @mpl.ticker.FuncFormatter
+    def major_formatter(x, pos):
+        return f"{x:.2f}"
+
+    n = len(shifts)
+    nm = kwargs.pop("n_bins", min(n, len(spectra)))
+    spectra -= (np.min(spectra, axis=-1, keepdims=True) - 1) # We can't have zeros
+    bins = binning(np.min(spectra), np.max(spectra), nm)
+    binda = np.empty((n, nm), dtype=int)
+    prd = []
+    for i in range(n):
+        bin_data = np.digitize(spectra[:, i] + dodatak, bins=bins, right=False)
+        prebroj = np.bincount(bin_data, minlength=nm)
+        prd.append(len(prebroj))
+        binda[i] = prebroj[:nm]
+
+    norm = kwargs.pop("norm", mpl.colors.LogNorm())
+    my_title = kwargs.pop("title", "")
+    alpha = kwargs.pop("alpha", .6)
+    figsize = kwargs.pop("figsize", (18, 10))
+    if add:
+        fig = plt.gcf()
+        ax = plt.gca()
+    else:
+        fig, ax = plt.subplots(figsize=figsize)
+    if facecolor:
+        ax.set_facecolor(facecolor)
+    with plt.style.context(style):
+        plt.pcolormesh(binda.T, norm=norm, shading=shading, cmap=cmap,
+                       alpha=alpha)
+        plt.title(my_title)
+        # poz_y = plt.yticks()[0][1:-1].astype(int)
+        # plt.yticks(poz_y, bins[poz_y].astype(int))
+        # poz_x = plt.xticks()[0][1:-1].astype(int)
+        # plt.xticks(poz_x, da.shifts.data[poz_x].astype(int))
+        ax.xaxis.set_major_formatter(mpl.ticker.FuncFormatter(tocm_1))
+        ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(restablish_zero))
+        # ax.yaxis.set_major_formatter(major_formatter)
+        plt.ylabel("Intensity")
+        # scaler = mpl.scale.FuncScale(plt.gca(), (forward, backward))
+        # plt.yscale(scaler)
+        # ax.set_ylim(3, 750)
+        if note:
+            explanation = (f"NOTE: This plot shows all of the {len(da)}"
+                           f" spectra binned in {nm} bins.\n"
+                           f"The binning is done with {binning.__name__}")
+            fig.supxlabel(f"{explanation:<50s}", fontsize=10)#, transform=plt.gca().transAxes)
+        try:
+            plt.colorbar(shrink=.5, label="Number of spectra in the bin.")
+        except:
+            pass
+ 
+
+
+class ShowSpectra(object):
+    """Rapidly visualize Raman spectra.
+
+    Imortant: Your spectra can either be a 2D ndarray
+    (1st dimension is for counting the spectra,
+    the 2nd dimension is for the intensities)
+    And that would be the standard use-case.
+    But:
+    Your spectra can also be a tuple of 2D ndarrays,
+    For example, you can chose to visualize the spectra,
+    the baseline and the corrected spectra, all together.
+    
+    Parameters:
+    -----------
+    input_spectra = 2D ndarray-like or a tuple of same
+        in the latter case, each element of the tuple has
+        to have the same dimensions (2D)
+    sigma:
+        what's on the x-axis, optional
+    title: str or iterable of the same length as the spectra, optional
+    labels: tuple of labels, optional
+        should be of same length as the tuple containing spectra
+
+    Returns
+    -------
+    The interactive visualization.
+    (you can scroll through the spectra with a slider,
+     or using left/right keyboard arrows)
+
+    Note:
+        When there's only one spectrum to visualize, it bugs.
+    """
+
+    def __init__(self, input_spectra, sigma=None, **kwargs):
+        
+        if isinstance(input_spectra, tuple):  # stack along the last axis
+            self.my_spectra = np.stack(tuple(np.array(ss) for ss in input_spectra), axis=-1)
+        else:
+            self.my_spectra = np.array(input_spectra)
+
+        # Let's render everything in 3D :)
+        if self.my_spectra.ndim == 1:
+            self.my_spectra = self.my_spectra[np.newaxis, :, np.newaxis]
+        if self.my_spectra.ndim == 2:
+            self.my_spectra = self.my_spectra[:, :, np.newaxis]
+        
+        if sigma is not None:
+            self.sigma = sigma
+        else:
+            try:  # if DataArray contains shifts
+                if isinstance(input_spectra, tuple):
+                    self.sigma = input_spectra[0].shifts.data
+                else:
+                    self.sigma = input_spectra.shifts.data
+            except:
+                self.sigma = np.arange(self.my_spectra.shape[1])
+
+
+        assert self.my_spectra.shape[1] == len(self.sigma),\
+               "Check your Raman shifts array. The dimensions " + \
+               f"of your spectra ({self.my_spectra.shape[1]}) and that of " + \
+               f"your Ramans shifts ({len(self.sigma)}) are not the same."
+
+        self.first_frame = 0
+        self.last_frame = len(self.my_spectra)-1
+        self.fig, self.ax = plt.subplots()
+        # Create some space for the slider:
+        self.fig.subplots_adjust(bottom=0.19, right=0.89)
+        self.title = kwargs.get('title', None)
+        self.label = kwargs.get('labels', [None])
+        if (not hasattr(self.label[0], '__iter__')\
+           or len(self.label[0]) != self.my_spectra.shape[0]\
+           or isinstance(self.label[0], str))\
+           and self.label[0] is not None:
+            self.label = [self.label]*self.my_spectra.shape[0]
+            self.spectrumplot = self.ax.plot(self.sigma, self.my_spectra[0],
+                                             label=self.label[0])
+        else:
+            self.spectrumplot = self.ax.plot(self.sigma, self.my_spectra[0])
+
+        self.titled(0)
+        self.axcolor = 'lightgoldenrodyellow'
+        self.axframe = self.fig.add_axes([0.15, 0.1, 0.7, 0.03])
+        # self.axframe.plot(self.sigma, np.median(self.my_spectra, axis=0))
+        if len(self.my_spectra) > 1:
+            self.sframe = Slider(self.axframe, 'N°',
+                                 self.first_frame, self.last_frame, valfmt='%d',
+                                 valinit=self.first_frame, valstep=1)
+            # calls the "update" function when changing the slider position
+            self.sframe.on_changed(self.update)
+            # Calling the "press" function on keypress event
+            # (only arrow keys left and right work)
+            self.fig.canvas.mpl_connect('key_press_event', self.press)
+        else:
+            self.axframe.axis('off')
+        # self.fig.show()
+
+    def titled(self, frame):
+        if self.title is None:
+            self.ax.set_title(f"Spectrum N° {frame+1} /{self.last_frame + 1}")
+        elif isinstance(self.title, str):
+            self.ax.set_title(f"{self.title} n°{frame}")
+        elif hasattr(self.title, '__iter__'):
+            self.ax.set_title(f"{self.title[frame]}")
+        if self.label[0] is not None:
+            handles, _ = self.ax.get_legend_handles_labels()
+            self.ax.legend(handles, self.label[frame])
+
+
+    def update(self, val):
+        """Use the slider to scroll through frames"""
+        frame = int(self.sframe.val)
+        current_spectrum = self.my_spectra[frame]
+        for i, line in enumerate(self.spectrumplot):
+            # self.ax.cla()
+            line.set_ydata(current_spectrum[:, i])
+            self.ax.relim()
+            self.ax.autoscale_view()
+        self.titled(frame)
+        self.fig.canvas.draw_idle()
+
+    def press(self, event):
+        """Use left and right arrow keys to scroll through frames one by one."""
+        frame = int(self.sframe.val)
+        if event.key == 'left' and frame > 0:
+            new_frame = frame - 1
+        elif event.key == 'right' and frame < self.last_frame:
+            new_frame = frame + 1
+        else:
+            new_frame = frame
+        self.sframe.set_val(new_frame)
+        current_spectrum = self.my_spectra[new_frame]
+        for i, line in enumerate(self.spectrumplot):
+            line.set_ydata(current_spectrum[:, i])
+            self.ax.relim()
+            self.ax.autoscale_view()
+        self.titled(new_frame)
+        self.ax.relim()
+        self.ax.autoscale_view()
+        self.fig.canvas.draw_idle()
