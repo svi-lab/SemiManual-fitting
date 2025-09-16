@@ -595,6 +595,10 @@ class fitonclick(object):
                  scrolling_speed=1,
                  initial_width=5,
                  bounds=None,
+                 A_bounds=(0.5, 2, "multiply"),
+                 x_bounds=(-20, 20, "add"),
+                 w_bounds=(0.2, 5, "multiply"),
+                 gl_bounds=(0, 1, "absolute"),
                  fitting_function=multi_pV,
                  initial_fit_on=np.median,
                  plot_results=True,
@@ -620,6 +624,10 @@ class fitonclick(object):
         self.scrolling_speed = scrolling_speed
         self.initial_width = initial_width
         self.fitting_function = fitting_function
+        self.A_bounds = A_bounds
+        self.x_bounds = x_bounds
+        self.w_bounds = w_bounds
+        self.gl_bounds = gl_bounds
         self.manualfit_spectra = None
         self.manualfit_params = None
         # Initiating variables to which we will atribute peak caractéristics:
@@ -658,11 +666,10 @@ class fitonclick(object):
         
         # Set the bounds in the search for the best fitting parameters:
         if bounds is None:
-            self.bounds = set_bounds(self.manualfit_params.reshape(
-                            self.peak_counter, 4))
+            self.bounds = set_bounds(self.manualfit_params.reshape(self.peak_counter, 4),
+                        A=self.A_bounds,x=self.x_bounds,w=self.w_bounds,gl=self.gl_bounds)
         else:
             self.bounds = bounds
-        
         # The actual fitting:
         self.fitted_params, self.b = curve_fit(self.fitting_function,
                                                self.x, self.y,
@@ -697,7 +704,11 @@ class fitonclick(object):
         
         if self.ally is not None:
             fpa = []
-            new_bounds = set_bounds(self.fitted_params.reshape(self.peak_counter, 4))
+            new_bounds = set_bounds(self.fitted_params.reshape(self.peak_counter, 4),
+                            A=self.A_bounds,
+                            x=self.x_bounds,
+                            w=self.w_bounds,
+                            gl=self.gl_bounds)
             for yy in self.ally:
                 # print(self.x.shape, yy.shape, self.fitted_params.shape)
                 fp, bi = curve_fit(self.fitting_function,

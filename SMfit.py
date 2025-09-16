@@ -14,6 +14,8 @@
 # - Left clicking on the top of existing peak erases it.
 
 # In[1]:
+import matplotlib
+matplotlib.use('TkAgg')
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
@@ -43,11 +45,11 @@ y += np.random.random(len(x))*np.mean(y)/5
 
 # In[3]:
 # check the docstring for the fitonclick class:
-mfit = ut.fitonclick(x, y, scrolling_speed=4, figsize=figsize)
-# Important:
-while mfit.block:
-    plt.waitforbuttonpress(timeout=-1)
-plt.close()  # You can also leave the plot on if you want
+mfit = ut.fitonclick(y, x, scrolling_speed=4, figsize=figsize)
+# # Important:
+# while mfit.block:
+#     plt.waitforbuttonpress(timeout=-1)
+# plt.close()  # You can also leave the plot on if you want
 # In[7]:
 x_size = mfit.x_size
 peaks_present: int = mfit.peak_counter
@@ -74,7 +76,7 @@ bounds = ut.set_bounds(mf_params.reshape(-1, 4),
                        w=(0.5, 16, "multiply"),
                        gl=(0, 1, "absolute"))
 
-
+mf_params = np.array(mf_params).ravel()
 # In[7]:
 # The curve-fitting part:
 fitted_params, b = curve_fit(fitting_function, x, y, method='trf',
@@ -150,5 +152,5 @@ for i in range(len(fitted_params)):
           f"{real_parameter_values[i]}")
 # %%
 # Deleting the class instance, in case you want to start over
-del mfit
-del mf_params
+# del mfit
+# del mf_params
