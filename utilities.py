@@ -18,6 +18,7 @@ from matplotlib.patches import Ellipse
 from scipy import sparse
 from scipy.optimize import minimize_scalar
 from skimage import io, transform
+from typing import Tuple, List, Callable
 import xarray as xr
 
 
@@ -123,25 +124,25 @@ def baseline_als(y, lam=1e5, p=5e-5, niter=12):
         It takes around 2-3 sec per 1000 spectra with 10 iterations
         on i7 4cores(8threads) @1,9GHz
 
-    '''
-    def _one_bl(yi, lam=lam, p=p, niter=niter, z=None):
-        if z is None:
-            L = yi.shape[-1]
-            D = sparse.diags([1, -2, 1], [0, -1, -2], shape=(L, L-2))
-            D = lam * D.dot(D.transpose())  # Precompute this term since it does not depend on `w`
-            w = np.ones(L)
-            W = sparse.spdiags(w, 0, L, L)
-        for i in range(niter):
-            W.setdiag(w)  # Do not create a new matrix, just update diagonal values
+    '''    
+    def _one_bl(yi, lam_p, p_p, niter_p):
+        L = yi.shape[-1]
+        D = sparse.diags([1, -2, 1], [0, -1, -2], shape=(L, L-2))
+        D = lam_p * D.dot(D.transpose())  # Precompute this term
+        z = None
+        w = np.ones(L)
+        W = sparse.spdiags(w, 0, L, L)
+        for i in range(niter_p):
+            W.setdiag(w)
             Z = W + D
             z = sparse.linalg.spsolve(Z, w*yi)
             w = p * (yi > z) + (1-p) * (yi < z)
         return z
 
     if y.ndim == 1:
-        b_line = _one_bl(y)
+        b_line = _one_bl(y, lam, p, niter)
     elif y.ndim == 2:
-        b_line = np.asarray(Parallel(n_jobs=-1)(delayed(_one_bl)(y[i])
+        b_line = np.asarray(Parallel(n_jobs=-1)(delayed(_one_bl)(y[i], lam, p, niter)
                                                 for i in range(y.shape[0])))
     else:
         warn("This only works for 1D or 2D arrays")
@@ -657,7 +658,7 @@ class fitonclick(object):
         self.y_size = 2 * set_size(self.y)
         self.cid = self.fig.canvas.mpl_connect('button_press_event',
                                                self.onclick)
-        self.cid2 = self.fig.canvas.mpl_connect('scroll_event', self.onclick)
+        self.cid2 = self.fig.canvas.mpl_connect('scroll_event', self.onscroll)
         self.cid3 = self.fig.canvas.mpl_connect("key_press_event", self.end_i)
         plt.show()
 
@@ -665,6 +666,11 @@ class fitonclick(object):
             plt.waitforbuttonpress(timeout=-1)
         
         # Set the bounds in the search for the best fitting parameters:
+        if self.peak_counter == 0:
+            warn("No peaks were added. Aborting fit.")
+            self.fitted_params, self.fitting_err, self.y_fitted = [], [], None
+            return
+
         if bounds is None:
             self.bounds = set_bounds(self.manualfit_params.reshape(self.peak_counter, 4),
                         A=self.A_bounds,x=self.x_bounds,w=self.w_bounds,gl=self.gl_bounds)
@@ -678,7 +684,7 @@ class fitonclick(object):
                                                absolute_sigma=False,
                                                bounds=self.bounds)
         self.fitting_err = np.sqrt(np.diag(self.b))
-        self.y_fitted = self.fitting_function(self.x, self.fitted_params) 
+        self.y_fitted = self.fitting_function(self.x, *self.fitted_params) 
 
         if plot_results:
             # Plotting the individual peaks after fitting
@@ -821,25 +827,24 @@ class fitonclick(object):
             raise("WTF?")
         self.fig.canvas.draw_idle()
 
+    def onscroll(self, event):
+        if event.inaxes == self.ax:
+            if self.peak_counter > 0:
+                self._adjust_peak_width(event, peak_identifier=-1)
+
     def onclick(self, event):
         if event.inaxes == self.ax:  # if you click inside the plot
             if event.button == 1:  # left click
                 # Create list of all elipes and check if the click was inside:
                 click_in_artist = [art.contains(event)[0]
                                    for art in self.artists]
-                if any(click_in_artist):  # if click was on any of the elipsis
+                if any(click_in_artist):  # if click was on any of the ellipses
                     # identify the one we clicked
                     clicked_indice = click_in_artist.index(True)
                     self._remove_peak(clicked_indice=clicked_indice)
-                else:  # if click was not on any of the already drawn elipsis
+                else:  # if click was not on any of the already drawn ellipses
                     self._add_peak(event)
-            elif event.step:  # if it's a mouse scroll event
-                if self.peak_counter:  # if there are any peaks
-                    self._adjust_peak_width(event, peak_identifier=-1)
-                    # peak_identifier = -1 means that scrolling will
-                    # only affect the last plotted peak
-
-            elif event.button != 1 and not event.step:
+            elif event.button == 3: # right-click
                 # So, basically, right or middle click both draw the sum:
                 self._draw_peak_sum()
 
@@ -852,15 +857,13 @@ class fitonclick(object):
 
     def end_i(self, event):
         if event.key == "enter":
-            self.pic['GL'] = [self.GL] * self.peak_counter
-            self.manualfit_params = np.array(list(self.pic['h']) +
-                                             list(self.pic['x0']) +
-                                             list(self.pic['w']) +
-                                             list(self.pic['GL'])
-                                             )
-            self.manualfit_params = self.manualfit_params.reshape(-1,
-                                                                  self.peak_counter).T
-            # self.manualfit_params = self.manualfit_params.ravel()
+            if self.peak_counter == 0:
+                self.manualfit_params = np.array([])
+                self.manualfit_spectra = np.zeros_like(self.x)
+            else:
+                self.pic['GL'] = [self.GL] * self.peak_counter
+                self.manualfit_params = np.array([self.pic['h'], self.pic['x0'], self.pic['w'], self.pic['GL']]).T
+                # self.manualfit_params = self.manualfit_params.ravel()
             if self.manualfit_spectra is None:  # even if not drawn
                 self.manualfit_spectra = np.sum(np.asarray(
                                           [self.pic['line'][i][0].get_ydata()
@@ -872,11 +875,11 @@ class fitonclick(object):
             self.block = False
 
 
-def set_bounds(initial_params,
-               A=(0.5, 2, "multiply"),
-               x=(-20, 20, "add"),
-               w=(0.2, 5, "multiply"),
-               gl=(0, 1, "absolute")):
+def set_bounds(initial_params: np.ndarray,
+               A: Tuple[float, float, str] = (0.5, 2, "multiply"),
+               x: Tuple[float, float, str] = (-20, 20, "add"),
+               w: Tuple[float, float, str] = (0.2, 5, "multiply"),
+               gl: Tuple[float, float, str] = (0, 1, "absolute")) -> Tuple[np.ndarray, np.ndarray]:
     """Define the bounds based on the initial parameters.
 
     Parameters:
@@ -922,8 +925,8 @@ def set_bounds(initial_params,
         else:
             def func(mp, p):
                 return p
-        lower_bounds[:, i] = np.asarray([func(mp[i], p[0]) for mp in initial_params])
-        upper_bounds[:, i] = np.asarray([func(mp[i], p[1]) for mp in initial_params])
+        lower_bounds[:, i] = func(initial_params[:, i], p[0])
+        upper_bounds[:, i] = func(initial_params[:, i], p[1])
 
     return (lower_bounds.ravel(), upper_bounds.ravel())
 #%%
